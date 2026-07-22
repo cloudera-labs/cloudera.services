@@ -362,7 +362,12 @@ def diff_dict(
     )
 
 
-def paginated(default_page_size=100):
+def paginated(
+    default_page_size=100,
+    next_key=None,
+    token_param="pageToken",
+    size_param="pageSize",
+):
     """
     Decorator to handle automatic pagination for Cloudera Data Services API methods.
 
@@ -372,26 +377,37 @@ def paginated(default_page_size=100):
             # Method implementation
             pass
 
+        # For snake_case tokens:
+        @paginated(next_key="next_page_token", token_param="page_token", size_param="page_size")
+        def list_projects(self, page_size=None, page_token=None):
+            ...
+
     Args:
-        page_size: Default page size to use if not provided
+        default_page_size: Default page size to use if not provided.
+        next_key: The response field holding the continuation token. If None (default),
+            auto-detect "nextPageToken" then "nextToken" (the camelCase convention).
+        token_param: The request keyword used to send the continuation token.
+        size_param: The request keyword used to send the page size.
 
     Returns:
         Decorator function
     """
+
+    candidate_keys = [next_key] if next_key is not None else ["nextPageToken", "nextToken"]
 
     def decorator(func):
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):
             # Add default page size if not specified
             paginated_kwargs = kwargs.copy()
-            if "pageSize" not in paginated_kwargs:
+            if size_param not in paginated_kwargs:
                 # Use instance page size if available, otherwise use decorator default
                 page_size = getattr(
                     self,
                     "page_size",
                     default_page_size,
                 )
-                paginated_kwargs["pageSize"] = page_size
+                paginated_kwargs[size_param] = page_size
 
             # Get the initial response
             response = func(self, *args, **paginated_kwargs)
@@ -399,14 +415,16 @@ def paginated(default_page_size=100):
             if not isinstance(response, dict):
                 return response
 
-            # Determine which pagination token is used
+            # Determine which pagination token is used. A token key that is present
+            # but empty (blank string, None, etc.) signals no further pages, so it is
+            # treated as absent to avoid looping indefinitely.
             next_token_key = None
-            if "nextPageToken" in response:
-                next_token_key = "nextPageToken"
-            elif "nextToken" in response:
-                next_token_key = "nextToken"
+            for candidate in candidate_keys:
+                if response.get(candidate):
+                    next_token_key = candidate
+                    break
             else:
-                # No pagination token found, return as-is
+                # No populated pagination token found, return as-is
                 return response
 
             # Collect all items from paginated responses
@@ -421,23 +439,24 @@ def paginated(default_page_size=100):
                 else:
                     all_items[key] = value
 
-            # Continue pagination while nextToken exists
-            while next_token_key in all_items:
+            # Continue pagination only while the continuation token is present AND
+            # populated. An empty/None token ends pagination.
+            while all_items.get(next_token_key):
                 token = all_items.pop(next_token_key)
 
                 # Add pagination parameters
                 paginated_kwargs = kwargs.copy()
-                paginated_kwargs["pageToken"] = token
+                paginated_kwargs[token_param] = token
 
                 # Add default page size if not specified
-                if "pageSize" not in paginated_kwargs:
+                if size_param not in paginated_kwargs:
                     # Use instance page size if available, otherwise use decorator default
                     page_size = getattr(
                         self,
                         "page_size",
                         default_page_size,
                     )
-                    paginated_kwargs["pageSize"] = page_size
+                    paginated_kwargs[size_param] = page_size
 
                 # Get next page
                 next_page = func(self, *args, **paginated_kwargs)
@@ -450,10 +469,15 @@ def paginated(default_page_size=100):
                     if key in next_page and isinstance(next_page[key], list):
                         all_items[key].extend(next_page[key])
 
-                # Update other fields from latest response (including potential nextToken)
+                # Update other fields from latest response (including potential token).
+                # Skip request-echo keys (pageToken/pageSize or page_token/page_size).
                 for key, value in next_page.items():
                     if key not in list_keys and not key.startswith("page"):
                         all_items[key] = value
+
+            # Drop a trailing empty continuation token if the last page carried one.
+            if next_token_key in all_items and not all_items[next_token_key]:
+                del all_items[next_token_key]
 
             return all_items
 
@@ -1467,7 +1491,16 @@ class ServicesModule(abc.ABC, metaclass=AutoExecuteMeta):
         )
 
         # Create the Ansible REST client with its own cookies and settings
-        self.api_client = AnsibleServicesClient(
+        self.api_client = self.build_api_client()
+
+    def build_api_client(self) -> ServicesClient:
+        """Construct the REST client for this module.
+
+        Override to supply an authenticated ``AnsibleServicesClient`` subclass (e.g. one
+        that injects a bearer token header). The default returns an unauthenticated
+        ``AnsibleServicesClient`` relying on cookie/URL-based authentication.
+        """
+        return AnsibleServicesClient(
             module=self.module,
             timeout=self.timeout,
             default_page_size=self.page_size,
