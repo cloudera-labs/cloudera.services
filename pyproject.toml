@@ -137,6 +137,13 @@ addopts = [
   "-m not slow and not data_service", # skip slow and data_service-dependent tests by default
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# Ansible modules must define the DOCUMENTATION, EXAMPLES, and RETURN string
+# constants before any imports (the Ansible community convention, enforced by
+# `ansible-test sanity`), so module-level imports intentionally do not appear at
+# the top of the file. Allow that layout for module plugins.
+"plugins/modules/**/*.py" = ["E402"]
+
 [build-system]
 requires = [
   "hatchling",
