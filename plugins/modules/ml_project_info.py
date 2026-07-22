@@ -15,271 +15,212 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
-
-from ansible_collections.cloudera.services.plugins.module_utils.ml import MLModule
-
-ANSIBLE_METADATA = {
-    "metadata_version": "1.1",
-    "status": ["preview"],
-    "supported_by": "community",
-}
-
 DOCUMENTATION = r"""
----
 module: ml_project_info
-short_description: Get information for Cloudera Machine Learning (CML) projects
+short_description: Retrieve information about Cloudera Machine Learning (CML) projects
 description:
-  - Get information for one or more Cloudera Machine Learning (CML) projects.
+  - Retrieve information about one or more Cloudera Machine Learning (CML) projects.
+  - The module can list all projects or filter by name or id.
   - The module supports C(check_mode).
-  - The module supports the C(v2) API only.
 author:
   - "Webster Mudge (@wmudge)"
 version_added: "1.0.0"
-requirements:
-  - requests
 options:
-  id:
-    description:
-      - The identifier of a project to retrieve.
-      - Mutually exclusive with C(name).
-    type: int
-    required: False
-    aliases:
-      - project_id
   name:
     description:
-      - The name of a project to retrieve.
-      - Mutually exclusive with C(id).
+      - The name of the project to retrieve.
+      - This parameter is mutually exclusive with O(id).
     type: str
-    required: False
+    required: false
     aliases:
-      - project_name
+      - project
+  id:
+    description:
+      - The unique identifier of the project to retrieve.
+      - This parameter is mutually exclusive with O(name).
+    type: str
+    required: false
+    aliases:
+      - project_id
 extends_documentation_fragment:
-  - cloudera.services.ml_endpoint
+  - cloudera.services.ml_client
+  - cloudera.services.services_client
 """
 
 EXAMPLES = r"""
-- name: Get details on all projects
+- name: List all CML projects
   cloudera.services.ml_project_info:
-    endpoint: "{{ cml_endpoint }}"
+    url: "https://ml-workspace.example.com"
     api_key: "{{ cml_api_key }}"
+  register: all_projects
 
-- name: Get details on a single project by name
+- name: Get information about a specific project by name
   cloudera.services.ml_project_info:
-    endpoint: "{{ cml_endpoint }}"
-    api_key: "{{ cml_api_key }}"
-    name: Name of the project
+    name: my-project
+  register: project_by_name
+
+- name: Get information about a specific project by id
+  cloudera.services.ml_project_info:
+    id: abcd-1234-efgh-5678
+  register: project_by_id
 """
 
 RETURN = r"""
----
 projects:
-  description: List of discovered projects
+  description: List of CML projects.
   returned: always
   type: list
   elements: dict
   contains:
-    created_at:
-      description: Creation timestamp
-      returned: always
-      type: str
-      sample: "2022-12-05T16:03:05.435018Z"
-    creation_status:
-      description: Current creation state
-      returned: always
-      type: str
-      sample: "success"
-    creator:
-      description: Details on the project creator
-      returned: always
-      type: dict
-      contains:
-        email:
-          description: Email address of the project creator
-          returned: when supported
-          type: str
-        name:
-          description: Name of the project creator
-          returned: when supported
-          type: str
-        username:
-          description: Username of the project creator
-          returned: always
-          type: str
-    default_engine_type:
-      description: Runtime engine
-      returned: always
-      type: str
-      sample: "ml_runtime"
-    description:
-      description: Description of the project
-      returned: always
-      type: str
-    environment:
-      description: Set of environmental variables for the project
-      returned: always
-      type: dict
     id:
-      description: Identifier for the project
-      returned: always
+      description: The unique identifier of the project.
       type: str
-      sample: "d5tv-auiv-yl59-ncmc"
+      returned: always
     name:
-      description: Name of the project
-      returned: always
+      description: The name of the project.
       type: str
-    owner:
-      description: Details on the project owner
-      returned: when supported
-      type: dict
-      contains:
-        email:
-          description: Email address of the project owner
-          returned: when supported
-          type: str
-        name:
-          description: Name of the project owner
-          returned: when supported
-          type: str
-        username:
-          description: Username of the project owner
-          returned: always
-          type: str
-    permissions:
-      description: Details on project permissions
       returned: always
-      type: dict
-      contains:
-        admin:
-          description: Administrative access
-          returned: always
-          type: bool
-        business_user:
-          description: Business User access
-          returned: always
-          type: bool
-        operator:
-          description: Operator access
-          returned: always
-          type: bool
-        read:
-          description: Read access
-          returned: always
-          type: bool
-        write:
-          description: Write access
-          returned: always
-          type: bool
-    shared_memory_limit:
-      description: Shared memory limit for the project
-      returned: when supported
-      type: int
-    updated_at:
-      description: Update timestamp
-      returned: when supported
+    description:
+      description: The description of the project.
       type: str
-      sample: "2022-12-05T17:40:34.154573Z"
+      returned: when available
     visibility:
-      description: Privacy flag for the project
-      returned: always
+      description: The visibility of the project.
       type: str
-      sample: "private"
+      returned: when available
+    environment:
+      description: The environment variables of the project.
+      type: dict
+      returned: when available
+    organization_permission:
+      description: The organization permission for the project.
+      type: str
+      returned: when available
+    parent_project:
+      description: The name of the parent project.
+      type: str
+      returned: when available
+    shared_memory_limit:
+      description: The additional shared memory limit, in MB, for each engine in the project.
+      type: int
+      returned: when available
+    default_project_engine_type:
+      description: The default engine type set when the project was created.
+      type: str
+      returned: when available
+    default_engine_type:
+      description: The default engine type of the project.
+      type: str
+      returned: when available
+    template:
+      description: The template used to create the project.
+      type: str
+      returned: when available
+    git_url:
+      description: The URL of the Git repository backing the project.
+      type: str
+      returned: when available
+    git_ref:
+      description: The Git repository branch or reference backing the project.
+      type: str
+      returned: when available
+    creator:
+      description: Details of the user that created the project.
+      type: dict
+      returned: when available
+      contains:
+        username:
+          description: The username of the creator.
+          type: str
+          returned: when available
+        name:
+          description: The display name of the creator.
+          type: str
+          returned: when available
+        email:
+          description: The email address of the creator.
+          type: str
+          returned: when available
+    created_at:
+      description: The timestamp when the project was created.
+      type: str
+      returned: when available
+    updated_at:
+      description: The timestamp when the project was last updated.
+      type: str
+      returned: when available
 sdk_out:
-  description: Returns the captured CML SDK log.
+  description: Returns the captured REST API log.
   returned: when supported
   type: str
 sdk_out_lines:
-  description: Returns a list of each line of the captured CML SDK log.
+  description: Returns a list of each line of the captured REST API log.
   returned: when supported
   type: list
   elements: str
 """
 
+from typing import Any, Dict, List
 
-class MLProjectInfo(MLModule):
-    def __init__(self, module):
-        super(MLProjectInfo, self).__init__(module)
+from ansible_collections.cloudera.services.plugins.module_utils.common import (
+    to_dict,
+)
+from ansible_collections.cloudera.services.plugins.module_utils.ml import (
+    MlServicesModule,
+    MlProject,
+    MlProjectClient,
+    validate_project_id,
+)
+
+
+class MlProjectInfoModule(MlServicesModule):
+    def __init__(self):
+        super().__init__(
+            argument_spec=dict(
+                name=dict(type="str", required=False, aliases=["project"]),
+                id=dict(type="str", required=False, aliases=["project_id"]),
+            ),
+            mutually_exclusive=[["name", "id"]],
+            supports_check_mode=True,
+        )
 
         # Set parameters
-        self.public = self._get_param("public")
-        self.user = self._get_param("user")
-        self.name = self._get_param("name")
-        self.id = self._get_param("id")
+        self.name = self.get_param("name")
+        self.id = self.get_param("id")
 
-        # Initialize the return values
-        self.projects = []
+        # Initialize result variables
+        self.project_list: List[MlProject] = []
 
-        # Execute logic process
-        self.process()
-
-    @MLModule.process_debug
-    def process(self):
+    def process(self) -> None:
+        client = MlProjectClient(self.api_client)
         if self.id:
-            existing = self.get_project(self.id)
-            self.projects = [existing]
-            return
-
-        query_params = dict(include_public_projects=self.public)
-
-        search_filter = dict()
-        if self.user:
-            search_filter["creator.username"] = self.user
-        if self.name:
-            search_filter["name"] = self.name
-
-        if search_filter:
-            query_params["search_filter"] = json.dumps(
-                search_filter,
-                separators=(",", ":"),
-            )
-
-        self.projects = self.query(
-            method="GET",
-            api=["projects"],
-            field="projects",
-            params=query_params,
-        )
+            if not validate_project_id(self.id):
+                self.module.fail_json(msg="Invalid Project ID: %s" % self.id)
+            project = client.describe_project(self.id)
+            if project:
+                self.project_list.append(project)
+        else:
+            projects = client.list_projects()
+            if self.name:
+                projects = [p for p in projects if p.name == self.name]
+            self.project_list.extend(projects)
 
 
 def main():
-    module = MLModule.ansible_module(
-        # TODO Expand to creator and owner
-        argument_spec=dict(
-            public=dict(
-                required=False,
-                type=bool,
-                default=True,
-                aliases=["include_public_projects"],
-            ),
-            user=dict(
-                required=False,
-                type="str",
-                aliases=["username", "creator_username"],
-            ),
-            name=dict(required=False, type="str", aliases=["project"]),
-            id=dict(required=False, type="str", aliases=["project_id"]),
-        ),
-        mutually_exclusive=[
-            ["name", "id"],
-        ],
-        supports_check_mode=True,
+    result = MlProjectInfoModule()
+
+    output: Dict[str, Any] = dict(
+        changed=False,
+        projects=[to_dict(project) for project in result.project_list],
     )
 
-    result = MLProjectInfo(module)
-
-    output = dict(
-        changed=result.changed,
-        projects=result.projects,
-    )
-
-    if result.debug:
+    if result.debug_log:
         output.update(
             sdk_out=result.log_out,
             sdk_out_lines=result.log_lines,
         )
 
-    module.exit_json(**output)
+    result.module.exit_json(**output)
 
 
 if __name__ == "__main__":
