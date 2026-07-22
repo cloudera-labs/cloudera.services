@@ -15,417 +15,695 @@
 # limitations under the License.
 
 """
-A common Ansible Module for shared functions for the CML Workspace API V2.
+Service-model layer for the Cloudera Machine Learning (CML) Workspace API v2.
+
 See https://docs.cloudera.com/machine-learning/cloud/api/topics/ml-api-v2.html
+
+This module uses typed dataclass models plus stateless ``*Client`` classes that
+operate against a ``ServicesClient``. CML authenticates with a bearer token 
+(``api_key``), so this module also provides:
+
+- ``CmlServicesClient`` - an ``AnsibleServicesClient`` subclass that injects the
+  ``Authorization: Bearer <api_key>`` header on every request.
+- ``CmlAuthMixin`` - a ``ParametersMixin`` declaring the shared ``url``/``api_key`` params.
+- ``MlServicesModule`` - a thin ``ServicesModule`` base wiring the two together, reused by
+  every ``ml_*`` module.
 """
 
-import http.client
-import io
-import json
-import logging
 import re
-import requests
 
-from typing import NamedTuple, List
-from functools import wraps
+from dataclasses import dataclass
+from http.cookiejar import CookieJar
+from typing import Any, Dict, List, Optional, Union
 
-from ansible.module_utils.basic import AnsibleModule, env_fallback
+from ansible.module_utils.basic import env_fallback
+
+from ansible_collections.cloudera.services.plugins.module_utils.common import (
+    from_dict,
+    to_dict,
+    NULLABLE,
+    ServicesClient,
+    AnsibleServicesClient,
+    ServicesModule,
+    ParametersMixin,
+    paginated,
+)
 
 __maintainer__ = [
     "wmudge@cloudera.com",
 ]
 
 API_VERSION = "api/v2"
-LOG = []
 
 
-class LogCaptureHandler(logging.Handler):
-    def emit(self, record):
-        msg = self.format(record)
-        global LOG
-        LOG.append(msg)
+# CML v2 uses snake_case pagination tokens; bind the shared decorator once.
+def _cml_paginated(func):
+    return paginated(
+        next_key="next_page_token",
+        token_param="page_token",
+        size_param="page_size",
+    )(func)
 
 
-def httpclient_log_func(*args):
-    LOG.append(args)
+class CmlServicesClient(AnsibleServicesClient):
+    """``AnsibleServicesClient`` that authenticates CML requests with a bearer token.
+
+    The token is read from the module's ``api_key`` parameter and attached as an
+    ``Authorization`` header, which ``AnsibleServicesClient`` merges into every request.
+    """
+
+    def __init__(self, module, **kwargs):
+        api_key = module.params.get("api_key")
+        headers = dict(kwargs.pop("headers", {}))
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        super().__init__(module=module, headers=headers, **kwargs)
 
 
-class Squelch(NamedTuple):
-    status_code: int
-    return_value: any
-
-
-class MLModule(AnsibleModule):
-    """A base ML Workspace module class for common parameters, fields, and methods."""
-
-    def __init__(self, module):
-        # Set common parameters
-        self.module = module
-        self.endpoint = self._get_param("endpoint").strip("/")
-        self.api_key = self._get_param("api_key")
-        self.debug = self._get_param("debug", default=False)
-        self.agent_header = self._get_param("agent_header", default="ClouderaFoundry")
-        self.endpoint_tls = self._get_param("endpoint_tls", default=True)
-
-        # Logging
-        _log_format = (
-            "%(asctime)s - %(threadName)s - %(name)s - %(levelname)s - %(message)s"
-        )
-        if self.debug:
-            # self._setup_logger(logging.DEBUG, _log_format)
-            handler = LogCaptureHandler()
-            root = logging.getLogger()
-            root.addHandler(handler)
-            root.setLevel(logging.DEBUG)
-            http.client.HTTPConnection.debuglevel = 1
-            http.client.print = httpclient_log_func
-        else:
-            self._setup_logger(logging.ERROR, _log_format)
-
-        # Initialize common return values
-        self.log_out = None
-        self.log_lines = []
-        self.changed = False
-
-        # Requests
-        self.requests = requests
-        self._api_path = [self.endpoint, API_VERSION]
-
-    def _get_param(self, *params, default=None):
-        """Fetches an Ansible input parameter, including nested options, if it exists, else returns optional default or None"""
-        p = dict(self.module.params)
-        for key in params:
-            try:
-                p = p[key]
-                if p is None:
-                    return default
-            except KeyError:
-                return default
-        return p
-
-    def _setup_logger(self, log_level, log_format):
-        http.client.HTTPConnection.debuglevel = 1
-
-        # logging.basicConfig()
-        self.logger = logging.getLogger("MLSDK")
-        self.logger.setLevel(log_level)
-
-        requests_log = logging.getLogger("urllib3")
-        requests_log.setLevel(log_level)
-        requests_log.propagate = True
-
-        self.__log_capture = io.StringIO()
-        handler = logging.StreamHandler(self.__log_capture)
-        handler.setLevel(log_level)
-
-        formatter = logging.Formatter(log_format)
-        handler.setFormatter(formatter)
-
-        self.logger.addHandler(handler)
-        requests_log.addHandler(handler)
-
-    def _get_log(self):
-        # contents = self.__log_capture.getvalue()
-        # self.__log_capture.truncate(0)
-        # return contents
-        global LOG
-        return LOG
-
-    @classmethod
-    def process_debug(cls, f):
-        @wraps(f)
-        def _impl(self, *args, **kwargs):
-            result = f(self, *args, **kwargs)
-            if self.debug:
-                self.log_out = self._get_log()
-                self.module.fail_msg(msg=self.log_out)
-                self.log_lines.append(self.log_out.splitlines())
-            return result
-
-        return _impl
-
-    def find_project(self, name: str):
-        query_params = dict(
-            include_public_projects=True,
-            search_filter=json.dumps(dict(name=name), separators=(",", ":")),
-        )
-        project_list = self.query(
-            method="GET",
-            api=["projects"],
-            field="projects",
-            params=query_params,
-        )
-        if project_list and len(project_list) == 1:
-            return project_list[0]
-        elif len(project_list) > 1:
-            self.module.fail_json(msg="Multiple projects found for name: " + name)
-        else:
-            return None
-
-    def get_project(self, id: str):
-        project = self.query(
-            method="GET",
-            api=["projects", id],
-            squelch=[Squelch(403, None)],
-        )
-        if project:
-            return project
-        else:
-            return None
-
-    def find_job(self, project_id: str, name: str):
-        query_params = dict(
-            search_filter=json.dumps(dict(name=name), separators=(",", ":")),
-        )
-        job_list = self.query(
-            method="GET",
-            api=["projects", project_id, "jobs"],
-            field="jobs",
-            params=query_params,
-        )
-        if job_list and len(job_list) == 1:
-            return job_list[0]
-        elif len(job_list) > 1:
-            self.module.fail_json(msg="Multiple jobs found for name: " + name)
-        else:
-            return None
-
-    def get_job(self, project_id: str, id: str):
-        job = self.query(
-            method="GET",
-            api=["projects", project_id, "jobs", id],
-            squelch=[Squelch(403, None)],
-        )
-        if job:
-            return job
-        else:
-            return None
-
-    def find_model(self, project_id: str, name: str):
-        query_params = dict(
-            search_filter=json.dumps(dict(name=name), separators=(",", ":")),
-        )
-        model_list = self.query(
-            method="GET",
-            api=["projects", project_id, "models"],
-            field="models",
-            params=query_params,
-        )
-        if model_list and len(model_list) == 1:
-            return model_list[0]
-        elif len(model_list) > 1:
-            self.module.fail_json(msg="Multiple models found for name: " + name)
-        else:
-            return None
-
-    def get_model(self, project_id: str, id: str):
-        model = self.query(
-            method="GET",
-            api=["projects", project_id, "models", id],
-            squelch=[Squelch(403, None)],
-        )
-        if model:
-            return model
-        else:
-            return None
-
-    def find_latest_build(self, project_id: str, model_id: str):
-        build_list = self.query(
-            method="GET",
-            api=["projects", project_id, "models", model_id, "builds"],
-            field="model_builds",
-            params=dict(
-                sort="-created_at",
-                search_filter=json.dumps(dict(status="built"), separators=(",", ":")),
-            ),
-        )
-        if build_list:
-            return build_list[0]
-        else:
-            return None
-
-    def get_build(self, project_id: str, model_id: str, id: str):
-        build = self.query(
-            method="GET",
-            api=["projects", project_id, "models", model_id, "builds", id],
-            squelch=[Squelch(403, None)],
-        )
-        if build:
-            return build
-        else:
-            return None
-
-    def find_application(self, project_id: str, name: str):
-        query_params = dict(
-            search_filter=json.dumps(dict(name=name), separators=(",", ":")),
-        )
-        app_list = self.query(
-            method="GET",
-            api=["projects", project_id, "applications"],
-            field="applications",
-            params=query_params,
-        )
-        if app_list and len(app_list) == 1:
-            return app_list[0]
-        elif len(app_list) > 1:
-            self.module.fail_json(msg="Multiple applications found for name: " + name)
-        else:
-            return None
-
-    def get_application(self, project_id: str, id: str):
-        app = self.query(
-            method="GET",
-            api=["projects", project_id, "applications", id],
-            squelch=[Squelch(403, None)],
-        )
-        if app:
-            return app
-        else:
-            return None
-
-    def _process_request(self, req, squelch):
-        resp = req.json()
-        if req.status_code != 200:
-            for s in squelch:
-                if req.status_code == s.status_code:
-                    return s.return_value
-            self.module.fail_json(
-                msg=resp["message"],
-                error=resp["error"],
-                code=resp["code"],
-                details=resp["details"],
-            )
-        return resp
-
-    def _process_pagination(self, endpoint_call, endpoint_args, return_field):
-        results = []
-
-        resp = endpoint_call(endpoint_args)
-        if resp is None:
-            return None
-
-        while "next_page_token" in resp and resp["next_page_token"]:
-            results.extend(resp[return_field])
-            endpoint_args["page_token"] = resp["next_page_token"]
-            resp = endpoint_call(endpoint_args)
-
-        results.extend(resp[return_field])
-        return results
-
-    def query(
-        self,
-        method: str,
-        api: List[str] = [],
-        field: str = None,
-        squelch: List[Squelch] = [],
-        params={},
-        body={},
-    ):
-        """Execute a Workspace API query"""
-
-        def _api_call(query_args={}):
-            req = self.requests.request(
-                method.upper(),
-                "/".join(self._api_path + api),
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {self.api_key}",
-                },
-                params=query_args,
-                data=json.dumps(body, separators=(",", ":")),
-                verify=self.endpoint_tls,
-            )
-            return self._process_request(req, squelch)
-
-        if field is None:
-            return _api_call(params)
-        else:
-            return self._process_pagination(_api_call, params, field)
+class CmlAuthMixin(ParametersMixin):
+    """Declares the shared CML connection parameters (``url`` and ``api_key``)."""
 
     @staticmethod
-    def ansible_module(argument_spec={}, **kwargs):
-        """Default Ansible module argument spec and dependencies for the CML API"""
-        return AnsibleModule(
-            argument_spec=dict(
-                **argument_spec,
-                endpoint=dict(
-                    required=True,
-                    type="str",
-                    aliases=["url", "workspace_url"],
-                    fallback=(env_fallback, ["CML_ENDPOINT"]),
-                ),
-                api_key=dict(
-                    required=True,
-                    type="str",
-                    no_log=True,
-                    aliases=["token"],
-                    fallback=(env_fallback, ["CML_API_KEY"]),
-                ),
-                debug=dict(
-                    required=False,
-                    type="bool",
-                    default=False,
-                    aliases=["debug_endpoint"],
-                ),
-                agent_header=dict(
-                    required=False,
-                    type="str",
-                    default="ClouderaFoundry",
-                ),
-                endpoint_tls=dict(
-                    required=False,
-                    type="bool",
-                    default=True,
-                    aliases=["verify_endpoint_tls", "verify_tls", "verify_api_tls"],
-                ),
+    def get_argument_spec() -> Dict[str, Dict[str, Any]]:
+        return dict(
+            # Override the base ``url`` (merged from url_argument_spec just before mixin
+            # specs) to add the CML endpoint alias and environment fallback.
+            url=dict(
+                type="str",
+                required=True,
+                aliases=["endpoint", "endpoint_url", "workspace_url"],
+                fallback=(env_fallback, ["CML_ENDPOINT"]),
             ),
-            **kwargs,
+            api_key=dict(
+                type="str",
+                required=True,
+                no_log=True,
+                aliases=["token"],
+                fallback=(env_fallback, ["CML_API_KEY"]),
+            ),
+        )
+
+    def init_parameters(self) -> None:
+        self.api_key: Optional[str] = self.get_param("api_key")  # type: ignore[attr-defined]
+
+
+class MlServicesModule(ServicesModule, CmlAuthMixin):
+    """Base class for CML (``ml_*``) modules using bearer-token authentication."""
+
+    def build_api_client(self) -> ServicesClient:
+        return CmlServicesClient(
+            module=self.module,
+            timeout=self.timeout,
+            default_page_size=self.page_size,
+            cookies=CookieJar(),
         )
 
 
-def validate_project_id(id: str):
+# ---------------------------------------------------------------------------
+# Projects
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class MlProject:
+    """A CML project."""
+
+    name: str
+    id: Union[str, None, NULLABLE] = NULLABLE
+    description: Union[str, None, NULLABLE] = NULLABLE
+    visibility: Union[str, None, NULLABLE] = NULLABLE
+    environment: Union[Dict[str, Any], str, None, NULLABLE] = NULLABLE
+    organization_permission: Union[str, None, NULLABLE] = NULLABLE
+    parent_project: Union[str, None, NULLABLE] = NULLABLE
+    shared_memory_limit: Union[int, None, NULLABLE] = NULLABLE
+    default_project_engine_type: Union[str, None, NULLABLE] = NULLABLE
+    default_engine_type: Union[str, None, NULLABLE] = NULLABLE
+    template: Union[str, None, NULLABLE] = NULLABLE
+    git_url: Union[str, None, NULLABLE] = NULLABLE
+    git_ref: Union[str, None, NULLABLE] = NULLABLE
+    creator: Union[Dict[str, Any], None, NULLABLE] = NULLABLE
+    created_at: Union[str, None, NULLABLE] = NULLABLE
+    updated_at: Union[str, None, NULLABLE] = NULLABLE
+
+
+class MlProjectClient:
+    """CML Project API client."""
+
+    def __init__(self, api_client: ServicesClient) -> None:
+        self.api_client: ServicesClient = api_client
+
+    @_cml_paginated
+    def _list_projects(self, **params) -> Dict[str, Any]:
+        return self.api_client.get(
+            f"/{API_VERSION}/projects",
+            params={"include_public_projects": True, **params},
+        )
+
+    def list_projects(self) -> List[MlProject]:
+        """List all projects accessible to the current user."""
+        resp = self._list_projects()
+        return [from_dict(MlProject, p) for p in resp.get("projects", [])]
+
+    def describe_project(self, project_id: str) -> Optional[MlProject]:
+        """Return a project by ID, or None if it is not found or not accessible."""
+        return from_dict(
+            MlProject,
+            self.api_client.get(
+                f"/{API_VERSION}/projects/{project_id}",
+                squelch={403: None, 404: None},
+            ),
+        )
+
+    def create_project(self, project: MlProject) -> MlProject:
+        """Create a project."""
+        return from_dict(
+            MlProject,
+            self.api_client.post(f"/{API_VERSION}/projects", data=to_dict(project)),
+        )
+
+    def update_project(self, project: MlProject) -> MlProject:
+        """Update a project (PATCH). ``project.id`` must be set."""
+        return from_dict(
+            MlProject,
+            self.api_client.patch(
+                f"/{API_VERSION}/projects/{project.id}",
+                data=to_dict(project),
+            ),
+        )
+
+    def delete_project(self, project_id: str) -> None:
+        """Delete a project by ID."""
+        self.api_client.delete(f"/{API_VERSION}/projects/{project_id}")
+
+
+# ---------------------------------------------------------------------------
+# Jobs
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class MlJob:
+    """A CML project job."""
+
+    name: str
+    id: Union[str, None, NULLABLE] = NULLABLE
+    project_id: Union[str, None, NULLABLE] = NULLABLE
+    script: Union[str, None, NULLABLE] = NULLABLE
+    kernel: Union[str, None, NULLABLE] = NULLABLE
+    cpu: Union[float, None, NULLABLE] = NULLABLE
+    memory: Union[float, None, NULLABLE] = NULLABLE
+    nvidia_gpu: Union[int, None, NULLABLE] = NULLABLE
+    runtime_identifier: Union[str, None, NULLABLE] = NULLABLE
+    schedule: Union[str, None, NULLABLE] = NULLABLE
+    parent_job_id: Union[str, None, NULLABLE] = NULLABLE
+    environment: Union[Dict[str, Any], str, None, NULLABLE] = NULLABLE
+    created_at: Union[str, None, NULLABLE] = NULLABLE
+    updated_at: Union[str, None, NULLABLE] = NULLABLE
+
+
+class MlJobClient:
+    """CML Job API client."""
+
+    def __init__(self, api_client: ServicesClient) -> None:
+        self.api_client: ServicesClient = api_client
+
+    @_cml_paginated
+    def _list_jobs(self, project_id: str, **params) -> Dict[str, Any]:
+        return self.api_client.get(
+            f"/{API_VERSION}/projects/{project_id}/jobs",
+            params=params,
+        )
+
+    def list_jobs(self, project_id: str) -> List[MlJob]:
+        resp = self._list_jobs(project_id)
+        return [from_dict(MlJob, j) for j in resp.get("jobs", [])]
+
+    def describe_job(self, project_id: str, job_id: str) -> Optional[MlJob]:
+        return from_dict(
+            MlJob,
+            self.api_client.get(
+                f"/{API_VERSION}/projects/{project_id}/jobs/{job_id}",
+                squelch={403: None, 404: None},
+            ),
+        )
+
+    def create_job(self, project_id: str, job: MlJob) -> MlJob:
+        return from_dict(
+            MlJob,
+            self.api_client.post(
+                f"/{API_VERSION}/projects/{project_id}/jobs",
+                data=to_dict(job),
+            ),
+        )
+
+    def update_job(self, project_id: str, job: MlJob) -> MlJob:
+        return from_dict(
+            MlJob,
+            self.api_client.patch(
+                f"/{API_VERSION}/projects/{project_id}/jobs/{job.id}",
+                data=to_dict(job),
+            ),
+        )
+
+    def delete_job(self, project_id: str, job_id: str) -> None:
+        self.api_client.delete(
+            f"/{API_VERSION}/projects/{project_id}/jobs/{job_id}",
+        )
+
+
+@dataclass
+class MlJobRun:
+    """A CML job run."""
+
+    id: Union[str, None, NULLABLE] = NULLABLE
+    job_id: Union[str, None, NULLABLE] = NULLABLE
+    project_id: Union[str, None, NULLABLE] = NULLABLE
+    status: Union[str, None, NULLABLE] = NULLABLE
+    environment: Union[Dict[str, Any], str, None, NULLABLE] = NULLABLE
+    created_at: Union[str, None, NULLABLE] = NULLABLE
+    scheduling_at: Union[str, None, NULLABLE] = NULLABLE
+    starting_at: Union[str, None, NULLABLE] = NULLABLE
+    finished_at: Union[str, None, NULLABLE] = NULLABLE
+
+
+class MlJobRunClient:
+    """CML Job Run API client."""
+
+    def __init__(self, api_client: ServicesClient) -> None:
+        self.api_client: ServicesClient = api_client
+
+    @_cml_paginated
+    def _list_job_runs(self, project_id: str, job_id: str, **params) -> Dict[str, Any]:
+        return self.api_client.get(
+            f"/{API_VERSION}/projects/{project_id}/jobs/{job_id}/runs",
+            params=params,
+        )
+
+    def list_job_runs(self, project_id: str, job_id: str) -> List[MlJobRun]:
+        resp = self._list_job_runs(project_id, job_id)
+        return [from_dict(MlJobRun, r) for r in resp.get("job_runs", [])]
+
+    def describe_job_run(
+        self,
+        project_id: str,
+        job_id: str,
+        run_id: str,
+    ) -> Optional[MlJobRun]:
+        return from_dict(
+            MlJobRun,
+            self.api_client.get(
+                f"/{API_VERSION}/projects/{project_id}/jobs/{job_id}/runs/{run_id}",
+                squelch={403: None, 404: None},
+            ),
+        )
+
+    def create_job_run(self, project_id: str, job_id: str, run: MlJobRun) -> MlJobRun:
+        return from_dict(
+            MlJobRun,
+            self.api_client.post(
+                f"/{API_VERSION}/projects/{project_id}/jobs/{job_id}/runs",
+                data=to_dict(run),
+            ),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Models, builds, and deployments
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class MlModel:
+    """A CML model."""
+
+    name: str
+    id: Union[str, None, NULLABLE] = NULLABLE
+    project_id: Union[str, None, NULLABLE] = NULLABLE
+    description: Union[str, None, NULLABLE] = NULLABLE
+    access_key: Union[str, None, NULLABLE] = NULLABLE
+    auth_enabled: Union[bool, None, NULLABLE] = NULLABLE
+    created_at: Union[str, None, NULLABLE] = NULLABLE
+    updated_at: Union[str, None, NULLABLE] = NULLABLE
+
+
+class MlModelClient:
+    """CML Model API client."""
+
+    def __init__(self, api_client: ServicesClient) -> None:
+        self.api_client: ServicesClient = api_client
+
+    @_cml_paginated
+    def _list_models(self, project_id: str, **params) -> Dict[str, Any]:
+        return self.api_client.get(
+            f"/{API_VERSION}/projects/{project_id}/models",
+            params=params,
+        )
+
+    def list_models(self, project_id: str) -> List[MlModel]:
+        resp = self._list_models(project_id)
+        return [from_dict(MlModel, m) for m in resp.get("models", [])]
+
+    def describe_model(self, project_id: str, model_id: str) -> Optional[MlModel]:
+        return from_dict(
+            MlModel,
+            self.api_client.get(
+                f"/{API_VERSION}/projects/{project_id}/models/{model_id}",
+                squelch={403: None, 404: None},
+            ),
+        )
+
+    def create_model(self, project_id: str, model: MlModel) -> MlModel:
+        return from_dict(
+            MlModel,
+            self.api_client.post(
+                f"/{API_VERSION}/projects/{project_id}/models",
+                data=to_dict(model),
+            ),
+        )
+
+    def update_model(self, project_id: str, model: MlModel) -> MlModel:
+        return from_dict(
+            MlModel,
+            self.api_client.patch(
+                f"/{API_VERSION}/projects/{project_id}/models/{model.id}",
+                data=to_dict(model),
+            ),
+        )
+
+    def delete_model(self, project_id: str, model_id: str) -> None:
+        self.api_client.delete(
+            f"/{API_VERSION}/projects/{project_id}/models/{model_id}",
+        )
+
+
+@dataclass
+class MlModelBuild:
+    """A CML model build."""
+
+    id: Union[str, None, NULLABLE] = NULLABLE
+    model_id: Union[str, None, NULLABLE] = NULLABLE
+    project_id: Union[str, None, NULLABLE] = NULLABLE
+    status: Union[str, None, NULLABLE] = NULLABLE
+    file_path: Union[str, None, NULLABLE] = NULLABLE
+    function_name: Union[str, None, NULLABLE] = NULLABLE
+    runtime_identifier: Union[str, None, NULLABLE] = NULLABLE
+    created_at: Union[str, None, NULLABLE] = NULLABLE
+    updated_at: Union[str, None, NULLABLE] = NULLABLE
+
+
+class MlModelBuildClient:
+    """CML Model Build API client."""
+
+    def __init__(self, api_client: ServicesClient) -> None:
+        self.api_client: ServicesClient = api_client
+
+    @_cml_paginated
+    def _list_builds(self, project_id: str, model_id: str, **params) -> Dict[str, Any]:
+        return self.api_client.get(
+            f"/{API_VERSION}/projects/{project_id}/models/{model_id}/builds",
+            params=params,
+        )
+
+    def list_builds(self, project_id: str, model_id: str) -> List[MlModelBuild]:
+        resp = self._list_builds(project_id, model_id)
+        return [from_dict(MlModelBuild, b) for b in resp.get("model_builds", [])]
+
+    def find_latest_build(
+        self,
+        project_id: str,
+        model_id: str,
+    ) -> Optional[MlModelBuild]:
+        """Return the most recently created build with a ``built`` status."""
+        resp = self.api_client.get(
+            f"/{API_VERSION}/projects/{project_id}/models/{model_id}/builds",
+            params={"sort": "-created_at", "search_filter": '{"status":"built"}'},
+        )
+        builds = resp.get("model_builds", []) if isinstance(resp, dict) else []
+        return from_dict(MlModelBuild, builds[0]) if builds else None
+
+    def describe_build(
+        self,
+        project_id: str,
+        model_id: str,
+        build_id: str,
+    ) -> Optional[MlModelBuild]:
+        return from_dict(
+            MlModelBuild,
+            self.api_client.get(
+                f"/{API_VERSION}/projects/{project_id}/models/{model_id}/builds/{build_id}",
+                squelch={403: None, 404: None},
+            ),
+        )
+
+
+@dataclass
+class MlModelDeployment:
+    """A CML model deployment."""
+
+    id: Union[str, None, NULLABLE] = NULLABLE
+    build_id: Union[str, None, NULLABLE] = NULLABLE
+    model_id: Union[str, None, NULLABLE] = NULLABLE
+    project_id: Union[str, None, NULLABLE] = NULLABLE
+    status: Union[str, None, NULLABLE] = NULLABLE
+    cpu: Union[float, None, NULLABLE] = NULLABLE
+    memory: Union[float, None, NULLABLE] = NULLABLE
+    replicas: Union[int, None, NULLABLE] = NULLABLE
+    created_at: Union[str, None, NULLABLE] = NULLABLE
+    updated_at: Union[str, None, NULLABLE] = NULLABLE
+
+
+class MlModelDeploymentClient:
+    """CML Model Deployment API client."""
+
+    def __init__(self, api_client: ServicesClient) -> None:
+        self.api_client: ServicesClient = api_client
+
+    @_cml_paginated
+    def _list_deployments(
+        self,
+        project_id: str,
+        model_id: str,
+        build_id: str,
+        **params,
+    ) -> Dict[str, Any]:
+        return self.api_client.get(
+            f"/{API_VERSION}/projects/{project_id}/models/{model_id}/builds/{build_id}/deployments",
+            params=params,
+        )
+
+    def list_deployments(
+        self,
+        project_id: str,
+        model_id: str,
+        build_id: str,
+    ) -> List[MlModelDeployment]:
+        resp = self._list_deployments(project_id, model_id, build_id)
+        return [
+            from_dict(MlModelDeployment, d)
+            for d in resp.get("model_deployments", [])
+        ]
+
+    def describe_deployment(
+        self,
+        project_id: str,
+        model_id: str,
+        build_id: str,
+        deployment_id: str,
+    ) -> Optional[MlModelDeployment]:
+        return from_dict(
+            MlModelDeployment,
+            self.api_client.get(
+                f"/{API_VERSION}/projects/{project_id}/models/{model_id}/builds/{build_id}/deployments/{deployment_id}",
+                squelch={403: None, 404: None},
+            ),
+        )
+
+    def create_deployment(
+        self,
+        project_id: str,
+        model_id: str,
+        build_id: str,
+        deployment: MlModelDeployment,
+    ) -> MlModelDeployment:
+        return from_dict(
+            MlModelDeployment,
+            self.api_client.post(
+                f"/{API_VERSION}/projects/{project_id}/models/{model_id}/builds/{build_id}/deployments",
+                data=to_dict(deployment),
+            ),
+        )
+
+    def delete_deployment(
+        self,
+        project_id: str,
+        model_id: str,
+        build_id: str,
+        deployment_id: str,
+    ) -> None:
+        self.api_client.delete(
+            f"/{API_VERSION}/projects/{project_id}/models/{model_id}/builds/{build_id}/deployments/{deployment_id}",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Applications
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class MlApplication:
+    """A CML application."""
+
+    name: str
+    id: Union[str, None, NULLABLE] = NULLABLE
+    project_id: Union[str, None, NULLABLE] = NULLABLE
+    subdomain: Union[str, None, NULLABLE] = NULLABLE
+    description: Union[str, None, NULLABLE] = NULLABLE
+    script: Union[str, None, NULLABLE] = NULLABLE
+    kernel: Union[str, None, NULLABLE] = NULLABLE
+    cpu: Union[float, None, NULLABLE] = NULLABLE
+    memory: Union[float, None, NULLABLE] = NULLABLE
+    nvidia_gpu: Union[int, None, NULLABLE] = NULLABLE
+    runtime_identifier: Union[str, None, NULLABLE] = NULLABLE
+    bypass_authentication: Union[bool, None, NULLABLE] = NULLABLE
+    environment: Union[Dict[str, Any], str, None, NULLABLE] = NULLABLE
+    status: Union[str, None, NULLABLE] = NULLABLE
+    created_at: Union[str, None, NULLABLE] = NULLABLE
+    updated_at: Union[str, None, NULLABLE] = NULLABLE
+
+
+class MlApplicationClient:
+    """CML Application API client."""
+
+    def __init__(self, api_client: ServicesClient) -> None:
+        self.api_client: ServicesClient = api_client
+
+    @_cml_paginated
+    def _list_applications(self, project_id: str, **params) -> Dict[str, Any]:
+        return self.api_client.get(
+            f"/{API_VERSION}/projects/{project_id}/applications",
+            params=params,
+        )
+
+    def list_applications(self, project_id: str) -> List[MlApplication]:
+        resp = self._list_applications(project_id)
+        return [from_dict(MlApplication, a) for a in resp.get("applications", [])]
+
+    def describe_application(
+        self,
+        project_id: str,
+        application_id: str,
+    ) -> Optional[MlApplication]:
+        return from_dict(
+            MlApplication,
+            self.api_client.get(
+                f"/{API_VERSION}/projects/{project_id}/applications/{application_id}",
+                squelch={403: None, 404: None},
+            ),
+        )
+
+    def create_application(
+        self,
+        project_id: str,
+        application: MlApplication,
+    ) -> MlApplication:
+        return from_dict(
+            MlApplication,
+            self.api_client.post(
+                f"/{API_VERSION}/projects/{project_id}/applications",
+                data=to_dict(application),
+            ),
+        )
+
+    def update_application(
+        self,
+        project_id: str,
+        application: MlApplication,
+    ) -> MlApplication:
+        return from_dict(
+            MlApplication,
+            self.api_client.patch(
+                f"/{API_VERSION}/projects/{project_id}/applications/{application.id}",
+                data=to_dict(application),
+            ),
+        )
+
+    def delete_application(self, project_id: str, application_id: str) -> None:
+        self.api_client.delete(
+            f"/{API_VERSION}/projects/{project_id}/applications/{application_id}",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Runtimes (read-only)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class MlRuntime:
+    """A CML runtime."""
+
+    image_identifier: Union[str, None, NULLABLE] = NULLABLE
+    edition: Union[str, None, NULLABLE] = NULLABLE
+    kernel: Union[str, None, NULLABLE] = NULLABLE
+    editor: Union[str, None, NULLABLE] = NULLABLE
+    description: Union[str, None, NULLABLE] = NULLABLE
+    full_version: Union[str, None, NULLABLE] = NULLABLE
+    runtime_metadata_version: Union[int, None, NULLABLE] = NULLABLE
+
+
+class MlRuntimeClient:
+    """CML Runtime API client (read-only)."""
+
+    def __init__(self, api_client: ServicesClient) -> None:
+        self.api_client: ServicesClient = api_client
+
+    @_cml_paginated
+    def _list_runtimes(self, **params) -> Dict[str, Any]:
+        return self.api_client.get(f"/{API_VERSION}/runtimes", params=params)
+
+    def list_runtimes(self) -> List[MlRuntime]:
+        resp = self._list_runtimes()
+        return [from_dict(MlRuntime, r) for r in resp.get("runtimes", [])]
+
+
+@dataclass
+class MlRuntimeAddon:
+    """A CML runtime addon."""
+
+    identifier: Union[str, None, NULLABLE] = NULLABLE
+    component: Union[str, None, NULLABLE] = NULLABLE
+    display_name: Union[str, None, NULLABLE] = NULLABLE
+    status: Union[str, None, NULLABLE] = NULLABLE
+
+
+class MlRuntimeAddonClient:
+    """CML Runtime Addon API client (read-only)."""
+
+    def __init__(self, api_client: ServicesClient) -> None:
+        self.api_client: ServicesClient = api_client
+
+    @_cml_paginated
+    def _list_runtime_addons(self, **params) -> Dict[str, Any]:
+        return self.api_client.get(f"/{API_VERSION}/runtimeaddons", params=params)
+
+    def list_runtime_addons(self) -> List[MlRuntimeAddon]:
+        resp = self._list_runtime_addons()
+        return [from_dict(MlRuntimeAddon, a) for a in resp.get("runtime_addons", [])]
+
+
+# ---------------------------------------------------------------------------
+# Validators
+# ---------------------------------------------------------------------------
+
+
+def validate_project_id(id: str) -> bool:
+    """Validate a CML project ID of the form ``xxxx-xxxx-xxxx-xxxx``."""
     pattern = re.compile("^(?:[a-z0-9]{4}-){3}[a-z0-9]{4}$")
     return True if pattern.fullmatch(id) else False
 
 
-def validate_build_id(id: str):
-    pattern = re.compile(
-        "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-    )
-    return True if pattern.fullmatch(id) else False
-
-
-def validate_subdomain(subdomain: str):
+def validate_subdomain(subdomain: str) -> bool:
+    """Validate an application subdomain (lowercase alphanumerics with internal hyphens)."""
     pattern = re.compile("^[a-z0-9]+(-[a-z0-9]+)*$")
     return True if pattern.fullmatch(subdomain) else False
-
-
-def difference(source: any, target: any):
-    if isinstance(source, dict) and isinstance(target, dict):
-        collector = dict()
-        if source.keys() != target.keys():
-            s1 = set(source.keys())
-            s2 = set(target.keys())
-            common_keys = s1 & s2
-            addl_keys = s1 - s2
-        else:
-            common_keys = set(source.keys())
-            addl_keys = []
-        for k in common_keys:
-            result = difference(source[k], target[k])
-            if result is not None:
-                collector[k] = result
-        for a in addl_keys:
-            collector[a] = source[a]
-        if collector:
-            return collector
-    elif isinstance(source, list) and isinstance(target, list):
-        if len(source) != len(target):
-            return source
-        for i in range(len(source)):
-            result = difference(source[i], target[i])
-            if result:
-                return source
-    else:
-        if source != target:
-            return source
