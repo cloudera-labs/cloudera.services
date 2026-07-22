@@ -15,75 +15,59 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
-
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.cloudera.services.plugins.module_utils.ml import (
-    MLModule,
-    difference,
-    validate_project_id,
-)
-
-ANSIBLE_METADATA = {
-    "metadata_version": "1.1",
-    "status": ["preview"],
-    "supported_by": "community",
-}
-
 DOCUMENTATION = r"""
----
 module: ml_project
-short_description: Create and delete Cloudera Machine Learning (CML) project
+short_description: Create and delete Cloudera Machine Learning (CML) projects
 description:
-  - Create and delete a Cloudera Machine Learning (CML) project.
-  - The module supports check_mode.
-  - The module supports the C(v1) API only.
+  - Create, update, or delete a Cloudera Machine Learning (CML) project.
+  - The module supports C(check_mode).
 author:
   - "Webster Mudge (@wmudge)"
 version_added: "1.0.0"
-requirements:
-  - requests
 options:
   name:
     description:
-      - The name of the CML project
-    required: false
+      - The name of the CML project.
+      - Required when creating a project.
+      - Mutually exclusive with O(id).
     type: str
+    required: false
     aliases:
       - project
   id:
     description:
-      - Id of an existing CML project
-    required: false
+      - The unique identifier of an existing CML project.
+      - Mutually exclusive with O(name).
     type: str
+    required: false
     aliases:
       - project_id
   desc:
     description:
-      - Description of the project
-    required: false
+      - Description of the project.
     type: str
+    required: false
     aliases:
       - description
   template:
     description:
-      - Template to use for the CML project
-    required: false
+      - Template to use when creating the CML project.
+      - Only used when creating a project.
+      - Local files are not yet supported.
     type: str
+    required: false
     choices:
       - R
       - Python
       - PySpark
       - Scala
-      - Churn Predictor
-      - local
       - git
       - blank
   visibility:
     description:
-      - Visibility of the project
-    required: false
+      - Visibility of the project.
     type: str
+    required: false
     choices:
       - public
       - private
@@ -91,24 +75,24 @@ options:
   git:
     description:
       - URL of the Git repository.
-      - Required for I(template=git).
-    required: false
+      - Required for O(template=git). Only used when creating a project.
     type: str
+    required: false
     aliases:
       - git_url
   git_branch:
     description:
       - Branch for the Git repository.
-      - Only used if I(template=git) is specified.
-    required: false
+      - Only used with O(template=git) when creating a project.
     type: str
+    required: false
     aliases:
       - git_ref
   runtime:
     description:
-      - Runtime of the CML project
-    required: false
+      - Default engine type of the CML project.
     type: str
+    required: false
     choices:
       - ml_runtime
       - legacy_engine
@@ -116,238 +100,401 @@ options:
       - default_project_engine_type
   env:
     description:
-      - Environment variables that can be accessed from your scripts within the project
-    required: false
+      - Environment variables accessible from scripts within the project.
+      - On update, the provided variables are merged with the project's existing variables.
     type: dict
+    required: false
     aliases:
       - environment_variables
   permission:
     description:
-      - Permissions for a user inside the CML project
-    required: false
+      - Organization permission for the project.
     type: str
+    required: false
     aliases:
       - organization_permission
   parent:
     description:
-      - Name of parent project
-    required: false
+      - Name of the parent project.
     type: str
+    required: false
     aliases:
       - parent_project
   memory:
     description:
-      - Additional shared memory limit that each engine in this project has.
-      - Expressed in MB.
-    required: false
+      - Additional shared memory limit, in MB, for each engine in the project.
     type: int
+    required: false
     aliases:
       - shared_memory_limit
   state:
     description:
-      - The declarative state of the CML project
-    required: false
+      - The declarative state of the CML project.
     type: str
+    required: false
     default: present
     choices:
       - present
       - absent
 extends_documentation_fragment:
-  - cloudera.services.ml_endpoint
+  - cloudera.services.ml_client
+  - cloudera.services.services_client
 """
 
 EXAMPLES = r"""
+- name: Create a blank CML project
+  cloudera.services.ml_project:
+    url: "https://ml-workspace.example.com"
+    api_key: "{{ cml_api_key }}"
+    name: my-project
+    desc: "Example project"
+    state: present
 
+- name: Create a project from a Git repository
+  cloudera.services.ml_project:
+    name: git-project
+    template: git
+    git: "https://github.com/example/repo.git"
+    git_branch: main
+
+- name: Update a project's environment variables
+  cloudera.services.ml_project:
+    name: my-project
+    env:
+      LOG_LEVEL: debug
+
+- name: Delete a project by id
+  cloudera.services.ml_project:
+    id: abcd-1234-efgh-5678
+    state: absent
 """
 
 RETURN = r"""
----
+project:
+  description: The CML project details.
+  returned: always
+  type: dict
+  contains:
+    id:
+      description: The unique identifier of the project.
+      type: str
+      returned: always
+    name:
+      description: The name of the project.
+      type: str
+      returned: always
+    description:
+      description: The description of the project.
+      type: str
+      returned: when available
+    visibility:
+      description: The visibility of the project.
+      type: str
+      returned: when available
+    environment:
+      description: The environment variables of the project.
+      type: dict
+      returned: when available
+    organization_permission:
+      description: The organization permission for the project.
+      type: str
+      returned: when available
+    parent_project:
+      description: The name of the parent project.
+      type: str
+      returned: when available
+    shared_memory_limit:
+      description: The additional shared memory limit, in MB, for each engine in the project.
+      type: int
+      returned: when available
+    default_project_engine_type:
+      description: The default engine type set when the project was created.
+      type: str
+      returned: when available
+    default_engine_type:
+      description: The default engine type of the project.
+      type: str
+      returned: when available
+    template:
+      description: The template used to create the project.
+      type: str
+      returned: when available
+    git_url:
+      description: The URL of the Git repository backing the project.
+      type: str
+      returned: when available
+    git_ref:
+      description: The Git repository branch or reference backing the project.
+      type: str
+      returned: when available
+    creator:
+      description: Details of the user that created the project.
+      type: dict
+      returned: when available
+      contains:
+        username:
+          description: The username of the creator.
+          type: str
+          returned: when available
+        name:
+          description: The display name of the creator.
+          type: str
+          returned: when available
+        email:
+          description: The email address of the creator.
+          type: str
+          returned: when available
+    created_at:
+      description: The timestamp when the project was created.
+      type: str
+      returned: when available
+    updated_at:
+      description: The timestamp when the project was last updated.
+      type: str
+      returned: when available
 sdk_out:
-    description: Returns the captured CDP SDK log.
-    returned: when supported
-    type: str
+  description: Returns the captured REST API log.
+  returned: when supported
+  type: str
 sdk_out_lines:
-    description: Returns a list of each line of the captured CDP SDK log.
-    returned: when supported
-    type: list
-    elements: str
+  description: Returns a list of each line of the captured REST API log.
+  returned: when supported
+  type: list
+  elements: str
 """
 
+import json
 
-class MLProject(MLModule):
-    def __init__(self, module):
-        super(MLProject, self).__init__(module)
+from dataclasses import replace
+from typing import Any, Dict, Optional
+
+from ansible_collections.cloudera.services.plugins.module_utils.common import (
+    diff_dict,
+    to_dict,
+)
+from ansible_collections.cloudera.services.plugins.module_utils.ml import (
+    MlServicesModule,
+    MlProject,
+    MlProjectClient,
+    validate_project_id,
+)
+
+
+class MlProjectModule(MlServicesModule):
+    def __init__(self):
+        super().__init__(
+            argument_spec=dict(
+                name=dict(type="str", required=False, aliases=["project"]),
+                id=dict(type="str", required=False, aliases=["project_id"]),
+                desc=dict(type="str", required=False, aliases=["description"]),
+                template=dict(
+                    type="str",
+                    required=False,
+                    choices=[
+                        "R",
+                        "Python",
+                        "PySpark",
+                        "Scala",
+                        "git",
+                        "blank",
+                    ],
+                ),
+                visibility=dict(
+                    type="str",
+                    required=False,
+                    choices=["public", "organization", "private"],
+                ),
+                git=dict(type="str", required=False, aliases=["git_url"]),
+                git_branch=dict(type="str", required=False, aliases=["git_ref"]),
+                runtime=dict(
+                    type="str",
+                    required=False,
+                    choices=["ml_runtime", "legacy_engine"],
+                    aliases=["default_project_engine_type"],
+                ),
+                env=dict(type="dict", required=False, aliases=["environment_variables"]),
+                permission=dict(
+                    type="str",
+                    required=False,
+                    aliases=["organization_permission"],
+                ),
+                parent=dict(type="str", required=False, aliases=["parent_project"]),
+                memory=dict(type="int", required=False, aliases=["shared_memory_limit"]),
+                state=dict(
+                    type="str",
+                    required=False,
+                    choices=["present", "absent"],
+                    default="present",
+                ),
+            ),
+            mutually_exclusive=[["name", "id"]],
+            required_one_of=[["name", "id"]],
+            required_if=[
+                ["template", "git", ["git"]],
+            ],
+            supports_check_mode=True,
+        )
 
         # Set parameters
-        self.name = self._get_param("name")
-        self.id = self._get_param("id")
-        self.desc = self._get_param("desc")
-        self.user = self._get_param("user")
-        self.template = self._get_param("template")
-        self.visibility = self._get_param("visibility")
-        self.git = self._get_param("git")
-        self.git_branch = self._get_param("git_branch")
-        self.runtime = self._get_param("runtime")
-        self.env = self._get_param("env")
-        self.permission = self._get_param("permission")
-        self.parent = self._get_param("parent")
-        self.memory = self._get_param("memory")
-        self.state = self._get_param("state")
+        self.name = self.get_param("name")
+        self.id = self.get_param("id")
+        self.desc = self.get_param("desc")
+        self.template = self.get_param("template")
+        self.visibility = self.get_param("visibility")
+        self.git = self.get_param("git")
+        self.git_branch = self.get_param("git_branch")
+        self.runtime = self.get_param("runtime")
+        self.env = self.get_param("env")
+        self.permission = self.get_param("permission")
+        self.parent = self.get_param("parent")
+        self.memory = self.get_param("memory")
+        self.state = self.get_param("state")
 
         # Initialize the return values
         self.changed = False
-        self.project = {}
+        self.diff = {}
+        self.project: Optional[MlProject] = None
 
-        # Execute logic process
-        self.process()
+    def _merged_environment(self, existing: MlProject) -> Any:
+        """Merge the provided environment variables with the project's existing ones."""
+        if self.env is None:
+            return existing.environment
+        current = existing.environment
+        if isinstance(current, str):
+            try:
+                current = json.loads(current)
+            except (ValueError, TypeError):
+                current = {}
+        if not isinstance(current, dict):
+            current = {}
+        return {**current, **self.env}
 
-    def process(self):
-        existing = None
+    def process(self) -> None:
+        client = MlProjectClient(self.api_client)
+
+        existing: Optional[MlProject] = None
         if self.id:
             if not validate_project_id(self.id):
-                self.module.fail_json(msg="Invalid Project ID: " + self.id)
-            existing = self.get_project(self.id)
+                self.module.fail_json(msg="Invalid Project ID: %s" % self.id)
+            existing = client.describe_project(self.id)
         else:
-            existing = self.find_project(self.name)
+            existing = next(
+                (p for p in client.list_projects() if p.name == self.name),
+                None,
+            )
 
-        if self.state == "present":
-            payload = dict()
-            # Create and update
-            if self.name:
-                payload.update(name=self.name)
-            if self.desc:
-                payload.update(description=self.desc)
-            if self.env:
-                payload.update(environment=self.env)
-            if self.permission:
-                payload.update(organization_permission=self.permission)
-            if self.parent:
-                payload.update(parent_project=self.parent)
-            if self.memory:
-                payload.update(shared_memory_limit=self.memory)
-            if self.visibility:
-                payload.update(visibility=self.visibility)
-
-            # Update the project
+        if self.state == "absent":
             if existing:
-                if self.runtime:
-                    payload.update(default_engine_type=self.runtime)
-                if self.env:
-                    # Merge environment variables if they are present in the existing project
-                    if "environment" in existing:
-                        merged_env = {**json.loads(existing["environment"]), **self.env}
-                        payload.update(
-                            environment=json.dumps(merged_env, separators=(",", ":")),
-                        )
-                    else:
-                        payload.update(
-                            environment=json.dumps(self.env, separators=(",", ":")),
-                        )
-                # creator
-                # owner
-                diff = difference(payload, existing)
-                if diff and not self.module.check_mode:
-                    self.changed = True
-                    self.project = self.query(
-                        method="PATCH",
-                        api=["projects", existing["id"]],
-                        body=diff,
+                if not isinstance(existing.id, str):
+                    self.module.fail_json(
+                        msg="Project ID is invalid from existing project.",
                     )
-                else:
-                    self.project = existing
-            # Create the project
-            else:
-                if self.git:
-                    payload.update(git_url=self.git)
-                if self.git_branch:
-                    payload.update(git_ref=self.git_branch)
-                if self.template:
-                    payload.update(template=self.template)
-                if self.runtime:
-                    payload.update(default_project_engine_type=self.runtime)
-                if "template" not in payload:
-                    payload.update(template="blank")
+
+                self.changed = True
+
+                if self.module._diff:
+                    self.diff = {"before": to_dict(existing), "after": None}
+
                 if not self.module.check_mode:
-                    self.changed = True
-                    self.project = self.query(
-                        method="POST",
-                        api=["projects"],
-                        body=payload,
-                    )
-        elif existing and not self.module.check_mode:
-            # Delete the project
+                    client.delete_project(existing.id)
+            return
+
+        # state == "present"
+        if not existing:
+            if not self.name:
+                self.module.fail_json(
+                    msg="Parameter 'name' is required when creating a project.",
+                )
+
+            incoming = MlProject(name=self.name)
+            if self.desc is not None:
+                incoming.description = self.desc
+            if self.visibility is not None:
+                incoming.visibility = self.visibility
+            if self.env is not None:
+                incoming.environment = self.env
+            if self.permission is not None:
+                incoming.organization_permission = self.permission
+            if self.parent is not None:
+                incoming.parent_project = self.parent
+            if self.memory is not None:
+                incoming.shared_memory_limit = self.memory
+            if self.git is not None:
+                incoming.git_url = self.git
+            if self.git_branch is not None:
+                incoming.git_ref = self.git_branch
+            if self.runtime is not None:
+                incoming.default_project_engine_type = self.runtime
+            incoming.template = self.template if self.template is not None else "blank"
+
             self.changed = True
-            self.query(method="DELETE", api=["projects", existing["id"]])
+
+            if self.module._diff:
+                self.diff = {"before": None, "after": to_dict(incoming)}
+
+            if not self.module.check_mode:
+                self.project = client.create_project(incoming)
+            else:
+                self.project = incoming
+            return
+
+        # Update an existing project
+        desired = replace(
+            existing,
+            description=self.desc if self.desc is not None else existing.description,
+            visibility=(
+                self.visibility if self.visibility is not None else existing.visibility
+            ),
+            organization_permission=(
+                self.permission
+                if self.permission is not None
+                else existing.organization_permission
+            ),
+            parent_project=(
+                self.parent if self.parent is not None else existing.parent_project
+            ),
+            shared_memory_limit=(
+                self.memory if self.memory is not None else existing.shared_memory_limit
+            ),
+            default_engine_type=(
+                self.runtime
+                if self.runtime is not None
+                else existing.default_engine_type
+            ),
+            environment=self._merged_environment(existing),
+        )
+
+        prev_config, next_config = diff_dict(existing, desired)
+
+        if prev_config or next_config:
+            self.changed = True
+
+            if self.module._diff:
+                self.diff = {"before": prev_config, "after": next_config}
+
+            if not self.module.check_mode:
+                self.project = client.update_project(desired)
+            else:
+                self.project = desired
+        else:
+            self.project = existing
 
 
 def main():
-    # TODO Add creator and owner dicts
-    module = MLProject.ansible_module(
-        argument_spec=dict(
-            name=dict(required=False, type="str", aliases=["project"]),
-            id=dict(required=False, type="str", aliases=["project_id"]),
-            desc=dict(required=False, type="str", aliases=["description"]),
-            user=dict(required=False, type="str", aliases=["username"]),
-            template=dict(
-                required=False,
-                type="str",
-                choices=[
-                    "R",
-                    "Python",
-                    "PySpark",
-                    "Scala",
-                    "Churn Predictor",
-                    "local",
-                    "git",
-                    "blank",
-                ],
-            ),
-            visibility=dict(
-                required=False,
-                type="str",
-                choices=["public", "organization", "private"],
-            ),
-            git=dict(required=False, type="str", aliases=["git_url"]),
-            git_branch=dict(required=False, type="str", aliases=["git_ref"]),
-            runtime=dict(
-                required=False,
-                type="str",
-                choices=["ml_runtime", "legacy_engine"],
-                aliases=["default_project_engine_type"],
-            ),
-            env=dict(required=False, type="dict", aliases=["environment_variables"]),
-            permission=dict(
-                required=False,
-                type="str",
-                aliases=["organization_permission"],
-            ),
-            parent=dict(required=False, type="str", aliases=["parent_project"]),
-            memory=dict(required=False, type="int", aliases=["shared_memory_limit"]),
-            state=dict(
-                required=False,
-                type="str",
-                choices=["present", "absent"],
-                default="present",
-            ),
-        ),
-        required_one_of=[["name", "id"]],
-        supports_check_mode=True,
-    )
+    result = MlProjectModule()
 
-    result = MLProject(module)
-
-    output = dict(
+    output: Dict[str, Any] = dict(
         changed=result.changed,
-        project=result.project,
+        project=to_dict(result.project) if result.project else {},
     )
 
-    if result.debug:
+    if result.debug_log:
         output.update(
             sdk_out=result.log_out,
             sdk_out_lines=result.log_lines,
         )
 
-    module.exit_json(**output)
+    result.module.exit_json(**output)
 
 
 if __name__ == "__main__":
