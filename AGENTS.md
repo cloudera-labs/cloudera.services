@@ -1,8 +1,19 @@
 # Cloudera Runtime Collection - Development Guidelines
 
-This is an Ansible collection for Cloudera Data Platform (CDP) Public and Private Cloud services. See [README.md](README.md) for overview and [CONTRIBUTING.md](CONTRIBUTING.md) for contribution workflow.
+This is an Ansible collection for Cloudera Data Platform (CDP) Public and Private Cloud services. See [README.md](README.md) for overview and [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow.
 
-## Quick Start Commands
+This file is a **router**: the invariants below apply to all work; read the linked topic doc for the area you're touching rather than loading everything up front.
+
+## Critical rules (always apply)
+
+- Use **pytest**, never `ansible-test` — for unit *and* integration tests. See [docs/testing.md](docs/testing.md).
+- Python via **Hatch (uv-backed)**; Ansible in a **per-project venv**. No global installs.
+- Small, reviewable diffs; write the failing test first (TDD).
+- **Never edit generated `docsbuild/rst/*.rst`** — regenerate from module docstrings (`hatch run docs:build`).
+- `NULLABLE` = unset, `None` = explicitly null. Don't conflate them.
+- `ServicesModule` subclasses auto-run `process()` (`AutoExecuteMeta`) — no manual `main()` call.
+
+## Quick start commands
 
 **Setup environment:**
 ```bash
@@ -25,256 +36,20 @@ ansible-galaxy collection build
 hatch run docs:build  # Generate API docs
 ```
 
-## Architecture Patterns
+## Guide map
 
-### Module Base Classes
-
-The collection uses two architectures:
-
-**Modern (preferred for new modules):**
-- Inherit from `ServicesModule` in `plugins/module_utils/common.py`
-- Uses `AnsibleServicesClient` for HTTP operations
-- Implements `AutoExecuteMeta` metaclass (auto-calls `execute()` after `__init__`)
-- Abstract `process()` method contains business logic
-- Built-in pagination via `@paginated()` decorator
-
-**Legacy:**
-- Inherit from `CdpRestModule` (and variants: `CdpSsbModule`, `CdpEfmModule`, `MLModule`, `RangerModule`)
-- Direct `requests.Session` usage
-- Migrated to the modern architecture whenever possible, but some older modules still use this pattern
-
-### Data Model Pattern
-
-Use dataclasses with `NULLABLE` sentinel:
-```python
-from plugins.module_utils.common import NULLABLE, from_dict, to_dict, diff_dict
-
-@dataclass
-class MyResource:
-    id: Union[int, None, NULLABLE] = NULLABLE
-    name: Union[str, None, NULLABLE] = NULLABLE
-```
-
-- `NULLABLE` distinguishes unset from `None`
-- `from_dict()` / `to_dict()` for serialization
-- `diff_dict()` for computing changes between instances
-
-### Client Separation
-
-Separate concerns:
-- **Module class**: Ansible orchestration, parameter handling, state management
-- **Client class**: REST API operations, HTTP calls
-- **Model dataclass**: Data structure definition
-
-Example:
-```python
-class SsbProjectModule(ServicesModule):
-    def process(self):
-        client = SsbProjectClient(self.api_client)
-        # Use client for operations
-
-class SsbProjectClient:
-    def create_project(self, project: SsbProject) -> SsbProject:
-        # API calls here
-```
-
-## Naming Conventions
-
-- **Modules**: `{service}_{entity}.py` (e.g., `ssb_project.py`)
-- **Info modules**: `{service}_{entity}_info.py` (read-only queries)
-- **Module utils**: `{service}.py` or `cdp_{service}.py`
-- **Test files**: `test_{module_name}_{type}.py` (or `test_{module_name}_{type}_int.py` for integration)
-
-## Module Structure Template
-
-```python
-DOCUMENTATION = r"""
-module: service_entity
-short_description: Brief description (< 50 chars)
-description:
-  - Detailed description
-  - The module supports check_mode
-extends_documentation_fragment: cloudera.services.services_client
-options:
-  parameter_name:
-    description: What it does
-    type: str
-    required: true
-attributes:
-  check_mode:
-    support: full
-  diff_mode: # Only if applicable
-    support: full
-  platform:
-    platforms: all
-"""
-
-EXAMPLES = r"""
-- name: Example task
-  cloudera.services.service_entity:
-    endpoint: "{{ service_endpoint }}"
-    username: "{{ service_username }}"
-    password: "{{ service_password }}"
-    name: resource_name
-    state: present
-"""
-
-RETURN = r"""
-resource:
-    description: Resource details
-    returned: on success
-    type: dict
-"""
-
-class ServiceEntityModule(ServicesModule):
-    def __init__(self):
-        super().__init__(
-            argument_spec=dict(**Model.argument_spec(), state=...),
-            supports_check_mode=True,
-        )
-
-    def process(self):
-        # Implement logic
-        # Set self.changed and self.diff
-```
-
-## Testing Patterns
-
-### Unit Tests
-
-Use pytest with fixtures from `tests/unit/conftest.py`:
-
-```python
-def test_create_resource(module_args, mocker):
-    # Setup
-    mock_method = mocker.patch("module_utils.client.Client.create", return_value=...)
-    module_args({"endpoint": "https://example.com", "name": "test"})
-
-    # Execute
-    with pytest.raises(AnsibleExitJson) as e:
-        module.main()
-
-    # Assert
-    result = e.value.args[0]
-    assert result["changed"] is True
-    mock_method.assert_called_once()
-```
-
-**Integration tests:**
-- Suffix: `_int.py`
-- Use `env_context` fixture for environment variable checks and built-in skip conditions
-- Test against live APIs with proper environment variables set (e.g., `SERVICE_ENDPOINT`) using `env_context` fixture
-
-Fixtures should be defined in `tests/unit/conftest.py` or before the test functions in the same file.
-
-### Test Organization
-
-```
-tests/unit/plugins/<plugin_type>/
-  <plugin_family>/
-    <plugin_name>/
-      test_<plugin_name>_<plugin_type>.py
-      test_<plugin_name>_<plugin_type>_int.py
-```
-
-## Documentation Standards
-
-### Doc Fragments
-
-Use `extends_documentation_fragment: cloudera.services.services_client` for:
-- Standard HTTP client parameters (url/endpoint, username, password, certs)
-- Avoids duplicating common parameter docs
-
-Create new fragments in `plugins/doc_fragments/` for shared parameter groups for a module as needed.
-
-### DOCUMENTATION Block
-
-- Include all parameters from `argument_spec`
-- Specify accurate types: `str`, `int`, `bool`, `list`, `dict`, `path`
-- Add `required: true/false` and `default:` values
-- Use `choices:` for enums
-- Mark deprecated params appropriately
-
-### EXAMPLES Block
-
-- Use variables for credentials: `{{ endpoint }}`, `{{ username }}`
-- Show 2-4 common use cases (not exhaustive)
-- Include task names that explain purpose
-- Show state transitions (present/absent) where applicable
-
-### RETURN Block
-
-- Document all module return values
-- Specify `returned:` condition (always, on success, when changed, etc.)
-- Include nested structure for dicts with `contains:`
-
-### Validation
-
-After updating module docs:
-```bash
-ansible-doc -t module cloudera.services.module_name  # Validate parsing
-hatch run docs:build  # Regenerate RST docs
-```
-
-## State Management
-
-- Standard states: `present`, `absent`
-- Some modules: `started`, `stopped`, `synced`, `published`
-- Implement idempotency through existence checks
-- Use `diff_dict()` to detect changes
-- Validate immutable fields and fail if they change after creation
-- Restrict to declarative state management rather than imperative actions
-
-## Authentication Patterns
-
-**Modern modules (ServicesModule):**
-- Parameters: `url`/`endpoint`, `url_username`, `url_password`
-- Optional: `client_cert`, `client_key`, `validate_certs`
-
-**ML modules:**
-- `endpoint` + `api_key` (token-based)
-- Environment variables: `CML_ENDPOINT`, `CML_API_KEY`
-- Legacy, migrate to modern architecture
-
-**Ranger modules:**
-- `endpoint` + `username` + `password`
-- Uses `apache-ranger` Python client
-- Legacy, migrate to modern architecture
-
-## Common Gotchas
-
-1. **`AutoExecuteMeta` metaclass**: Modules with `ServicesModule` base auto-execute `process()` after `__init__` — no explicit `main()` call needed
-2. **NULLABLE vs None**: Use `NULLABLE` for unset optional fields, `None` for explicitly null values
-3. **Immutable fields**: Validate immutable fields don't change; fail with clear message if they do
-4. **RST docs are generated**: Never edit `docsbuild/rst/*.rst` files directly — they're auto-generated from module DOCUMENTATION strings
-5. **Collection path**: For `ansible-doc` and doc building, collection must be in `ANSIBLE_COLLECTIONS_PATHS`
-6. **Integration tests**: Need environment variables for service endpoints — tests will be skipped if not set via the `env_context` fixture
-7. **Pre-commit hooks**: Run automatically on commit — use `hatch run lint` to run manually on all files
-
-## Development Workflow
-
-1. Create/modify plugin in `plugins/<plugin_type>/<plugin_family>/<plugin_name>/`
-2. Update DOCUMENTATION/EXAMPLES/RETURN strings
-3. Validate: `ansible-doc -t <plugin_type> cloudera.services.<plugin_name>`
-4. Write unit tests in `tests/unit/plugins/<plugin_type>/<plugin_family>/<plugin_name>/`
-5. Write integration tests in `tests/unit/plugins/<plugin_type>/<plugin_family>/<plugin_name>/` with `_int.py` suffix and use `env_context` for env var checks
-5. Run tests: `pytest tests/unit/ <plugin name filter>`
-6. Run linter: `hatch run lint`
-7. Build collection: `ansible-galaxy collection build`
-8. Regenerate docs: `hatch run docs:build`
-
-## Custom Agents
-
-This workspace includes specialized agents in [.github/agents/](.github/agents/):
-
-- **@test-builder**: Constructs unit and integration tests for plugins (use when: creating tests, testing state transitions)
-- **@documentation-updater**: Updates module DOCUMENTATION strings (use when: synchronizing docs with code changes, adding parameters)
-
-Invoke agents with `@agent-name` followed by your request.
+| Topic | Read this when… | File |
+|---|---|---|
+| Architecture | adding/changing a module's base class, HTTP client, data model, or state handling | [docs/architecture.md](docs/architecture.md) |
+| Authentication | wiring auth/transport, adding a service's credentials, or touching ML/Ranger auth | [docs/authentication.md](docs/authentication.md) |
+| Authoring modules | creating a new module — naming, scaffolding template, end-to-end workflow | [docs/modules.md](docs/modules.md) |
+| Documentation | writing DOCUMENTATION/EXAMPLES/RETURN or doc fragments | [docs/documentation.md](docs/documentation.md) |
+| Testing | writing unit or integration tests, fixtures, test layout | [docs/testing.md](docs/testing.md) |
+| Gotchas | quick check before you commit; debugging surprising behavior | [docs/gotchas.md](docs/gotchas.md) |
 
 ## Resources
 
 - **API docs**: Run `hatch run docs:build` then open `docsbuild/build/html/index.html`
-- **Testing guide**: See `tests/unit/conftest.py` for test fixtures and utilities
+- **Testing guide**: [TESTING.md](TESTING.md) (integration env vars); `tests/unit/conftest.py` (fixtures/utilities)
 - **Module examples**: Check `plugins/modules/ssb_*.py` for modern architecture patterns
 - **Hatch commands**: Run `hatch env show` to see available environments and scripts
