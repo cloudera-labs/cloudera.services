@@ -15,405 +15,363 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
-
-from ansible_collections.cloudera.services.plugins.module_utils.ml import (
-    MLModule,
-    validate_project_id,
-)
-
-ANSIBLE_METADATA = {
-    "metadata_version": "1.1",
-    "status": ["preview"],
-    "supported_by": "community",
-}
-
 DOCUMENTATION = r"""
----
 module: ml_project_application_info
-short_description: Get information for Cloudera Machine Learning (CML) project applications
+short_description: Retrieve information about Cloudera Machine Learning (CML) project applications
 description:
-  - Get information for the available Cloudera Machine Learning (CML) project applications.
+  - Retrieve information about one or more Cloudera Machine Learning (CML) project applications.
+  - The module can list all applications within a project or filter by a number of criteria.
   - The module supports C(check_mode).
-  - The module supports the C(v2) API only.
 author:
   - "Webster Mudge (@wmudge)"
 version_added: "1.0.0"
-requirements:
-  - requests
 options:
   project_name:
     description:
-      - Full name of the Project within the CML Workspace.
-      - Mutually exclusive with I(project_id).
+      - The name of the enclosing project.
+      - Mutually exclusive with O(project_id).
     type: str
-    required: True
+    required: false
   project_id:
     description:
-      - Identifier of the Project within the CML Workspace.
-      - Mutually exclusive with I(project_name).
+      - The unique identifier of the enclosing project.
+      - Mutually exclusive with O(project_name).
     type: str
-    required: True
+    required: false
   id:
     description:
-      - Identifier of the Application.
+      - The unique identifier of a single application to retrieve.
     type: str
+    required: false
     aliases:
       - application_id
-  auth:
-    description:
-      - Flag to toggle L(restricted access,https://docs.cloudera.com/machine-learning/cloud/applications/topics/ml-securing-applications.html) to the Application.
-    type: bool
-    default: True
-    aliases:
-      - auth_enabled
-  creator:
-    description:
-      - Creator of the Application within the Project.
-    type: dict
-    suboptions:
-      name:
-        description:
-          - Name of the creator of the Application.
-        type: str
-      username:
-        description:
-          - Username of the creator of the Application.
-        type: str
-      email:
-        description:
-          - Email address of the creator of the Application.
   name:
     description:
-      - Name of the Application.
+      - Filter the applications by name.
     type: str
+    required: false
   kernel:
     description:
-      - Name of the kernel enabled for the Application.
+      - Filter the applications by kernel.
     type: str
+    required: false
   subdomain:
     description:
-      - DNS subdomain for the Application.
+      - Filter the applications by DNS subdomain.
     type: str
+    required: false
   desc:
     description:
-      - Description of the Application.
+      - Filter the applications by description.
     type: str
+    required: false
     aliases:
       - description
   script:
     description:
-      - Name of the entrypoint script executed within the kernel of the Application.
+      - Filter the applications by entrypoint script.
     type: str
+    required: false
   status:
     description:
-      - Runtime state of the Application.
+      - Filter the applications by runtime state.
     type: str
+    required: false
     choices:
       - running
       - stopping
       - stopped
       - starting
       - failed
+  auth:
+    description:
+      - Filter the applications by whether user authentication is required.
+      - When V(false), only publicly accessible applications are returned.
+    type: bool
+    required: false
+    aliases:
+      - auth_enabled
+  creator:
+    description:
+      - Filter the applications by creator details.
+    type: dict
+    required: false
+    suboptions:
+      name:
+        description:
+          - The display name of the creator.
+        type: str
+        required: false
+      username:
+        description:
+          - The username of the creator.
+        type: str
+        required: false
+      email:
+        description:
+          - The email address of the creator.
+        type: str
+        required: false
 extends_documentation_fragment:
-  - cloudera.services.ml_endpoint
+  - cloudera.services.ml_client
+  - cloudera.services.services_client
 """
 
 EXAMPLES = r"""
-- name: Get all Applications within the Project
+- name: List all applications within a project
   cloudera.services.ml_project_application_info:
-    project_name: Example Project
+    url: "https://ml-workspace.example.com"
+    api_key: "{{ cml_api_key }}"
+    project_name: my-project
+  register: all_applications
 
-- name: Get all Applications within the Project created by 'jdoe'
+- name: Get a single application by id
   cloudera.services.ml_project_application_info:
-    project_name: Example Project
+    project_id: "{{ project_id }}"
+    id: "{{ application_id }}"
+
+- name: List applications created by a user
+  cloudera.services.ml_project_application_info:
+    project_name: my-project
     creator:
       username: jdoe
 
-- name: Get all Applications within the Project that are stopped
+- name: List stopped applications
   cloudera.services.ml_project_application_info:
-    project_name: Example Project
+    project_name: my-project
     status: stopped
-
-- name: Get all Applications within the Project that are public
-  cloudera.services.ml_project_application_info:
-    project_name: Example Project
-    auth_enabled: no
 """
 
 RETURN = r"""
----
 applications:
-  description: Returns all Applications based on selection criteria.
+  description: List of CML applications.
   returned: always
   type: list
   elements: dict
   contains:
     id:
-      description:
-        - Identifier of the Application.
-      returned: always
+      description: The unique identifier of the application.
       type: str
+      returned: always
     name:
-      description:
-        - Name of the Application.
-      returned: always
+      description: The name of the application.
       type: str
-    description:
-      description:
-        - Description of the Application.
       returned: always
+    project_id:
+      description: The identifier of the enclosing project.
       type: str
-    creator:
-      description:
-        - Details on the creator of the Application.
-      returned: always
-      type: dict
-      contains:
-        username:
-          description:
-            - Username of the Application creator.
-          returned: always
-          type: str
-        name:
-          description:
-            - Name of the Application creator.
-          returned: always
-          type: str
-        email:
-          description:
-            - Email address of the Application creator
-    script:
-      description:
-        - Entrypoint script for the Application executed by the kernel.
-      returned: always
-      type: str
+      returned: when available
     subdomain:
-      description:
-        - DNS subdomain of the Application.
-      returned: always
+      description: The DNS subdomain of the application.
       type: str
-    status:
-      description:
-        - Current state of the Application.
-      returned: always
+      returned: when available
+    description:
+      description: The description of the application.
       type: str
-    created_at:
-      description:
-        - Creation timestamp of the Application.
-      returned: always
+      returned: when available
+    script:
+      description: The entrypoint script for the application.
       type: str
-      sample:
-        - "2022-07-11T21:03:13.809Z"
-    stopped_at:
-      description:
-        - Last stopped timestamp of the Application.
-      returned: when supported
-      type: str
-      sample:
-        - "2022-07-11T21:03:13.809Z"
-    updated_at:
-      description:
-        - Last updated timestamp of the Application.
-      returned: when supported
-      type: str
-      sample:
-        - "2022-07-11T21:03:13.809Z"
-    starting_at:
-      description:
-        - Last started timestamp of the Application.
-      returned: when supported
-      type: str
-      sample:
-        - "2022-07-11T21:03:13.809Z"
-    running_at:
-      description:
-        - Last running timestamp of the Application.
-      returned: when supported
-      type: str
-      sample:
-        - "2022-07-11T21:03:13.809Z"
+      returned: when available
     kernel:
-      description:
-        - Name of the kernel for the Application
-      returned: always
+      description: The kernel for the application.
       type: str
+      returned: when available
     cpu:
-      description:
-        - Allocated vCPU for the Application.
-      returned: always
+      description: The vCPU allocated to the application.
       type: float
+      returned: when available
     memory:
-      description:
-        - Allocated RAM for the Application.
-      returned: always
+      description: The RAM allocated to the application, in GB.
       type: float
+      returned: when available
     nvidia_gpu:
-      description:
-        - Allocated Nvidia GPUs for the Application.
-      returned: always
+      description: The count of Nvidia GPUs allocated to the application.
       type: int
-    bypass_authentication:
-      description:
-        - Flag indicating if Application access is restricted or public.
-      returned: always
-      type: bool
-    environment:
-      description:
-        - Environment variables defined for the Application.
-      returned: always
-      type: json
+      returned: when available
     runtime_identifier:
-      description:
-        - Identifier of the Runtime defined for the Application.
-      returned: always
+      description: The container runtime identifier for the application.
       type: str
+      returned: when available
+    runtime_addon_identifiers:
+      description: The runtime addon identifiers for the application.
+      type: list
+      elements: str
+      returned: when available
+    bypass_authentication:
+      description: Whether application access is public (unauthenticated).
+      type: bool
+      returned: when available
+    environment:
+      description: The environment variables of the application.
+      type: dict
+      returned: when available
+    status:
+      description: The current runtime state of the application.
+      type: str
+      returned: when available
+    creator:
+      description: Details of the user that created the application.
+      type: dict
+      returned: when available
+    created_at:
+      description: The timestamp when the application was created.
+      type: str
+      returned: when available
+    updated_at:
+      description: The timestamp when the application was last updated.
+      type: str
+      returned: when available
 sdk_out:
-    description: Returns the captured SDK log.
-    returned: when supported
-    type: str
+  description: Returns the captured REST API log.
+  returned: when supported
+  type: str
 sdk_out_lines:
-    description: Returns a list of each line of the captured SDK log.
-    returned: when supported
-    type: list
-    elements: str
+  description: Returns a list of each line of the captured REST API log.
+  returned: when supported
+  type: list
+  elements: str
 """
 
+from typing import Any, Dict, List, Optional
 
-class MLProjectApplicationInfo(MLModule):
-    def __init__(self, module):
-        super(MLProjectApplicationInfo, self).__init__(module)
+from ansible_collections.cloudera.services.plugins.module_utils.common import (
+    to_dict,
+)
+from ansible_collections.cloudera.services.plugins.module_utils.ml import (
+    MlServicesModule,
+    MlApplication,
+    MlApplicationClient,
+    MlProject,
+    MlProjectClient,
+    validate_project_id,
+)
+
+
+class MlProjectApplicationInfoModule(MlServicesModule):
+    def __init__(self):
+        super().__init__(
+            argument_spec=dict(
+                project_name=dict(type="str", required=False),
+                project_id=dict(type="str", required=False),
+                id=dict(type="str", required=False, aliases=["application_id"]),
+                name=dict(type="str", required=False),
+                kernel=dict(type="str", required=False),
+                subdomain=dict(type="str", required=False),
+                desc=dict(type="str", required=False, aliases=["description"]),
+                script=dict(type="str", required=False),
+                status=dict(
+                    type="str",
+                    required=False,
+                    choices=["running", "stopping", "stopped", "starting", "failed"],
+                ),
+                auth=dict(type="bool", required=False, aliases=["auth_enabled"]),
+                creator=dict(
+                    type="dict",
+                    required=False,
+                    options=dict(
+                        name=dict(type="str", required=False),
+                        username=dict(type="str", required=False),
+                        email=dict(type="str", required=False),
+                    ),
+                ),
+            ),
+            mutually_exclusive=[["project_name", "project_id"]],
+            required_one_of=[["project_name", "project_id"]],
+            supports_check_mode=True,
+        )
 
         # Set parameters
-        self.project_name = self._get_param("project_name")
-        self.project_id = self._get_param("project_id")
-        self.id = self._get_param("id")
-        self.auth = self._get_param("auth")
-        self.creator_email = self._get_param("creator", "email")
-        self.creator_name = self._get_param("creator", "name")
-        self.creator_username = self._get_param("creator", "username")
-        self.name = self._get_param("name")
-        self.kernel = self._get_param("kernel")
-        self.subdomain = self._get_param("subdomain")
-        self.desc = self._get_param("desc")
-        self.script = self._get_param("script")
-        self.status = self._get_param("status")
+        self.project_name = self.get_param("project_name")
+        self.project_id = self.get_param("project_id")
+        self.id = self.get_param("id")
+        self.name = self.get_param("name")
+        self.kernel = self.get_param("kernel")
+        self.subdomain = self.get_param("subdomain")
+        self.desc = self.get_param("desc")
+        self.script = self.get_param("script")
+        self.status = self.get_param("status")
+        self.auth = self.get_param("auth")
+        self.creator = self.get_param("creator")
 
-        # Initialize the return values
-        self.applications = []
+        # Initialize result variables
+        self.application_list: List[MlApplication] = []
 
-        # Execute logic process
-        self.process()
-
-    @MLModule.process_debug
-    def process(self):
+    def _resolve_project_id(self) -> str:
+        client = MlProjectClient(self.api_client)
+        project: Optional[MlProject] = None
         if self.project_id:
             if not validate_project_id(self.project_id):
-                self.module.fail_json(msg="Invalid Project ID: " + self.project_id)
-            project = self.get_project(self.project_id)
+                self.module.fail_json(msg="Invalid Project ID: %s" % self.project_id)
+            project = client.describe_project(self.project_id)
         else:
-            project = self.find_project(self.project_name)
-
+            project = next(
+                (p for p in client.list_projects() if p.name == self.project_name),
+                None,
+            )
         if not project:
             self.module.fail_json(msg="Project not found")
+        if not isinstance(project.id, str):
+            self.module.fail_json(msg="Project ID is invalid from resolved project.")
+        return project.id
+
+    def _matches(self, app: MlApplication) -> bool:
+        checks = {
+            "name": self.name,
+            "kernel": self.kernel,
+            "subdomain": self.subdomain,
+            "description": self.desc,
+            "script": self.script,
+            "status": self.status,
+        }
+        for attr, wanted in checks.items():
+            if wanted is not None and getattr(app, attr) != wanted:
+                return False
+
+        if self.auth is not None:
+            if app.bypass_authentication != (not self.auth):
+                return False
+
+        if self.creator:
+            creator = app.creator
+            if not isinstance(creator, dict):
+                return False
+            for key, wanted in self.creator.items():
+                if wanted is not None and creator.get(key) != wanted:
+                    return False
+
+        return True
+
+    def process(self) -> None:
+        project_id = self._resolve_project_id()
+        client = MlApplicationClient(self.api_client)
 
         if self.id:
-            self.applications = [self.get_application(project["id"], self.id)]
-        else:
-            search_filter = dict()
-            if self.creator_email:
-                search_filter["creator.email"] = self.creator_email
-            if self.creator_name:
-                search_filter["creator.name"] = self.creator_name
-            if self.creator_username:
-                search_filter["creator.username"] = self.creator_username
-            if self.name:
-                search_filter["name"] = self.name
-            if self.kernel:
-                search_filter["kernel"] = self.kernel
-            if self.auth is not None:
-                search_filter["bypass_authentication"] = not self.auth  # Note negation
-            if self.desc:
-                search_filter["description"] = self.desc
-            if self.subdomain:
-                search_filter["subdomain"] = self.subdomain
-            if self.script:
-                search_filter["script"] = self.script
-            if self.status:
-                search_filter["status"] = self.status
+            app = client.describe_application(project_id, self.id)
+            if app:
+                self.application_list.append(app)
+            return
 
-            query = dict(
-                method="GET",
-                api=["projects", project["id"], "applications"],
-                field="applications",
-            )
-
-            if search_filter:
-                query.update(
-                    params=dict(
-                        search_filter=json.dumps(search_filter, separators=(",", ":")),
-                    ),
-                )
-
-            self.applications = self.query(**query)
+        self.application_list = [
+            app for app in client.list_applications(project_id) if self._matches(app)
+        ]
 
 
 def main():
-    module = MLProjectApplicationInfo.ansible_module(
-        argument_spec=dict(
-            project_name=dict(required=False, type="str"),
-            project_id=dict(required=False, type="str"),
-            id=dict(required=False, type="str", aliases=["application_id"]),
-            auth=dict(required=False, type="bool", aliases=["auth_enabled"]),
-            creator=dict(
-                required=False,
-                type="dict",
-                options=dict(
-                    name=dict(required=False, type="str"),
-                    username=dict(required=False, type="str"),
-                    email=dict(required=False, type="str"),
-                ),
-            ),
-            name=dict(required=False, type="str"),
-            kernel=dict(required=False, type="str"),
-            subdomain=dict(required=False, type="str"),
-            desc=dict(required=False, type="str", aliases=["description"]),
-            script=dict(required=False, type="str"),
-            status=dict(
-                required=False,
-                type="str",
-                choices=[
-                    "running",
-                    "stopping",
-                    "stopped",
-                    "starting",
-                    "failed",
-                ],
-            ),
-        ),
-        required_one_of=[
-            ["project_name", "project_id"],
-        ],
-        mutually_exclusive=[
-            ["project_name", "project_id"],
-        ],
-        supports_check_mode=True,
-    )
+    result = MlProjectApplicationInfoModule()
 
-    result = MLProjectApplicationInfo(module)
-
-    output = dict(
+    output: Dict[str, Any] = dict(
         changed=False,
-        applications=result.applications,
+        applications=[to_dict(app) for app in result.application_list],
     )
 
-    if result.debug:
+    if result.debug_log:
         output.update(
             sdk_out=result.log_out,
             sdk_out_lines=result.log_lines,
         )
 
-    module.exit_json(**output)
+    result.module.exit_json(**output)
 
 
 if __name__ == "__main__":
