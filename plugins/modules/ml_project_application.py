@@ -15,107 +15,77 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
-
-from ansible_collections.cloudera.services.plugins.module_utils.ml import (
-    MLModule,
-    difference,
-    validate_project_id,
-    validate_subdomain,
-)
-
-
 DOCUMENTATION = r"""
 module: ml_project_application
-short_description: Create, update, and delete a Cloudera Machine Learning (CML) project application.
+short_description: Manage a Cloudera Machine Learning (CML) project application
 description:
-  - Create, update, and delete a Cloudera Machine Learning (CML) project application.
-  - The module supports check_mode.
-  - The module supports the C(v2) API only.
+  - Create, update, restart, stop, or delete a Cloudera Machine Learning (CML) project application.
+  - The V(restarted) and V(stopped) states imply V(present); if the application does not exist it is created (requiring O(subdomain), O(script), and O(runtime)) and then transitioned to the requested state.
+  - The module supports C(check_mode).
 author:
   - "Webster Mudge (@wmudge)"
 version_added: "1.0.0"
-requirements:
-  - requests
 options:
   project_name:
     description:
-      - The enclosing project name for the application.
-      - Either C(project_name) or C(project_id) is required.
+      - The name of the enclosing project for the application.
+      - Mutually exclusive with O(project_id).
     type: str
-    required: False
+    required: false
   project_id:
     description:
-      - The enclosing project ID for the application.
-      - Either C(project_name) or C(project_id) is required.
+      - The unique identifier of the enclosing project for the application.
+      - Mutually exclusive with O(project_name).
     type: str
-    required: False
+    required: false
   name:
     description:
       - The name of the application.
-      - Either C(name) or C(id) is required.
+      - Required when creating an application.
+      - Mutually exclusive with O(id).
     type: str
-    required: False
+    required: false
   id:
     description:
-      - The ID of the application.
-      - Either C(name) or C(id) is required.
+      - The unique identifier of an existing application.
+      - Mutually exclusive with O(name).
     type: str
+    required: false
     aliases:
       - application_id
-    required: False
   auth:
     description:
-      - Flag indicating if user authentication is required to use the application.
+      - Whether user authentication is required to access the application.
+      - When V(false), the application is publicly accessible.
     type: bool
-    required: False
+    required: false
     aliases:
       - auth_enabled
   cpu:
     description:
       - The vCPU allocated to the application.
     type: float
-    required: False
-  creator:
-    description:
-      - Details for the creator of the application.
-    type: dict
-    required: False
-    suboptions:
-      email:
-        description:
-          - The email address of the application creator.
-        type: str
-        required: False
-      name:
-        description:
-          - The description for the application creator.
-        type: str
-        required: False
-      username:
-        description:
-          - The username of the application creator.
-        type: str
-        required: False
+    required: false
   desc:
     description:
-      - The description for the application.
+      - The description of the application.
     type: str
-    required: False
+    required: false
     aliases:
       - description
   env:
     description:
-      - A set of environment variables to set on the application.
+      - Environment variables to set on the application.
+      - On update, the provided variables are merged with the application's existing variables.
     type: dict
-    required: False
+    required: false
     aliases:
       - env_vars
   kernel:
     description:
       - The kernel to use for the application.
     type: str
-    required: False
+    required: false
     choices:
       - python3
       - python2
@@ -125,46 +95,49 @@ options:
     description:
       - The RAM allocated to the application, in GB.
     type: float
-    required: False
+    required: false
   gpu:
     description:
       - The count of Nvidia GPUs allocated to the application.
     type: int
-    required: False
+    required: false
     aliases:
       - nvidia_gpu
   addons:
     description:
-      - A list of runtime addon identifiers within the application.
+      - A list of runtime addon identifiers for the application.
     type: list
     elements: str
-    required: False
+    required: false
     aliases:
       - runtime_addons
       - runtime_addon_identifiers
   runtime:
     description:
       - The container runtime identifier for the application.
+      - Required when creating an application.
     type: str
-    required: False
+    required: false
     aliases:
       - runtime_image_id
       - runtime_identifier
   script:
     description:
-      - Name of the execution script for the application.
+      - The entrypoint script for the application.
+      - Required when creating an application.
     type: str
-    required: False
+    required: false
   subdomain:
     description:
-      - The subdomain for the application.
+      - The DNS subdomain for the application.
+      - Required when creating an application.
     type: str
-    required: False
+    required: false
   state:
     description:
-      - The state of the application.
+      - The declarative state of the application.
     type: str
-    required: False
+    required: false
     default: present
     choices:
       - present
@@ -172,384 +145,405 @@ options:
       - stopped
       - absent
 extends_documentation_fragment:
-  - cloudera.services.ml_endpoint
+  - cloudera.services.ml_client
+  - cloudera.services.services_client
 """
 
 EXAMPLES = r"""
-- name: Start application
+- name: Create an application
   cloudera.services.ml_project_application:
-    endpoint: "{{ endpoint }}"
-    api_key: "{{ api_key }}"
-    project_id: "{{ project_id }}"
-    name: "My Application"
-    auth: True
-    script: "runme.py"
-    subdomain: "test-example"
+    url: "https://ml-workspace.example.com"
+    api_key: "{{ cml_api_key }}"
+    project_name: my-project
+    name: my-application
+    subdomain: my-app
+    script: app.py
+    runtime: "{{ runtime_id }}"
+    auth: true
     env:
-        FOO: bar
+      LOG_LEVEL: debug
     state: present
+
+- name: Restart an application
+  cloudera.services.ml_project_application:
+    project_id: "{{ project_id }}"
+    id: "{{ application_id }}"
+    state: restarted
+
+- name: Stop an application
+  cloudera.services.ml_project_application:
+    project_id: "{{ project_id }}"
+    name: my-application
+    state: stopped
+
+- name: Delete an application
+  cloudera.services.ml_project_application:
+    project_id: "{{ project_id }}"
+    id: "{{ application_id }}"
+    state: absent
 """
 
 RETURN = r"""
 application:
-    description: Returns the application.
-    returned: on success
-    type: dict
-    contains:
-        id:
-            description:
-                - Identifier of the Application.
-            returned: always
-            type: str
-        name:
-            description:
-                - Name of the Application.
-            returned: always
-            type: str
-        description:
-            description:
-                - Description of the Application.
-            returned: always
-            type: str
-        creator:
-            description:
-                - Details on the creator of the Application.
-            returned: always
-            type: dict
-            contains:
-                username:
-                    description:
-                        - Username of the Application creator.
-                    returned: always
-                    type: str
-                name:
-                    description:
-                        - Name of the Application creator.
-                    returned: always
-                    type: str
-                email:
-                    description:
-                        - Email address of the Application creator
-                    returned: always
-                    type: str
-        script:
-            description:
-                - Entrypoint script for the Application executed by the kernel.
-            returned: always
-            type: str
-        subdomain:
-            description:
-                - DNS subdomain of the Application.
-            returned: always
-            type: str
-        status:
-            description:
-                - Current state of the Application.
-            returned: always
-            type: str
-        created_at:
-            description:
-                - Creation timestamp of the Application.
-            returned: always
-            type: str
-            sample:
-                - "2022-07-11T21:03:13.809Z"
-        stopped_at:
-            description:
-                - Last stopped timestamp of the Application.
-            returned: when supported
-            type: str
-            sample:
-                - "2022-07-11T21:03:13.809Z"
-        updated_at:
-            description:
-                - Last updated timestamp of the Application.
-            returned: when supported
-            type: str
-            sample:
-                - "2022-07-11T21:03:13.809Z"
-        starting_at:
-            description:
-                - Last started timestamp of the Application.
-            returned: when supported
-            type: str
-            sample:
-                - "2022-07-11T21:03:13.809Z"
-        running_at:
-            description:
-                - Last running timestamp of the Application.
-            returned: when supported
-            type: str
-            sample:
-                - "2022-07-11T21:03:13.809Z"
-        kernel:
-            description:
-                - Name of the kernel for the Application
-            returned: always
-            type: str
-        cpu:
-            description:
-                - Allocated vCPU for the Application.
-            returned: always
-            type: float
-        memory:
-            description:
-                - Allocated RAM for the Application.
-            returned: always
-            type: float
-        nvidia_gpu:
-            description:
-                - Allocated Nvidia GPUs for the Application.
-            returned: always
-            type: int
-        bypass_authentication:
-            description:
-                - Flag indicating if Application access is restricted or public.
-            returned: always
-            type: bool
-        environment:
-            description:
-                - Environment variables defined for the Application.
-            returned: always
-            type: json
-        runtime_identifier:
-            description:
-                - Identifier of the Runtime defined for the Application.
-            returned: always
-            type: str
+  description: The CML application details.
+  returned: always
+  type: dict
+  contains:
+    id:
+      description: The unique identifier of the application.
+      type: str
+      returned: always
+    name:
+      description: The name of the application.
+      type: str
+      returned: always
+    project_id:
+      description: The identifier of the enclosing project.
+      type: str
+      returned: when available
+    subdomain:
+      description: The DNS subdomain of the application.
+      type: str
+      returned: when available
+    description:
+      description: The description of the application.
+      type: str
+      returned: when available
+    script:
+      description: The entrypoint script for the application.
+      type: str
+      returned: when available
+    kernel:
+      description: The kernel for the application.
+      type: str
+      returned: when available
+    cpu:
+      description: The vCPU allocated to the application.
+      type: float
+      returned: when available
+    memory:
+      description: The RAM allocated to the application, in GB.
+      type: float
+      returned: when available
+    nvidia_gpu:
+      description: The count of Nvidia GPUs allocated to the application.
+      type: int
+      returned: when available
+    runtime_identifier:
+      description: The container runtime identifier for the application.
+      type: str
+      returned: when available
+    runtime_addon_identifiers:
+      description: The runtime addon identifiers for the application.
+      type: list
+      elements: str
+      returned: when available
+    bypass_authentication:
+      description: Whether application access is public (unauthenticated).
+      type: bool
+      returned: when available
+    environment:
+      description: The environment variables of the application.
+      type: dict
+      returned: when available
+    status:
+      description: The current runtime state of the application.
+      type: str
+      returned: when available
+    creator:
+      description: Details of the user that created the application.
+      type: dict
+      returned: when available
+    created_at:
+      description: The timestamp when the application was created.
+      type: str
+      returned: when available
+    updated_at:
+      description: The timestamp when the application was last updated.
+      type: str
+      returned: when available
 sdk_out:
-    description: Returns the captured SDK log.
-    returned: when supported
-    type: str
+  description: Returns the captured REST API log.
+  returned: when supported
+  type: str
 sdk_out_lines:
-    description: Returns a list of each line of the captured SDK log.
-    returned: when supported
-    type: list
-    elements: str
+  description: Returns a list of each line of the captured REST API log.
+  returned: when supported
+  type: list
+  elements: str
 """
 
-# APPLICATION_STARTING, APPLICATION_STOPPED, APPLICATION_RUNNING
+from dataclasses import replace
+from typing import Any, Dict, Optional
+
+from ansible_collections.cloudera.services.plugins.module_utils.common import (
+    diff_dict,
+    to_dict,
+)
+from ansible_collections.cloudera.services.plugins.module_utils.ml import (
+    MlServicesModule,
+    MlApplication,
+    MlApplicationClient,
+    MlProject,
+    MlProjectClient,
+    validate_project_id,
+    validate_subdomain,
+)
+
+CREATE_REQUIRED = ["subdomain", "script", "runtime"]
 
 
-class MLProjectApplication(MLModule):
-    def __init__(self, module):
-        super(MLProjectApplication, self).__init__(module)
+class MlProjectApplicationModule(MlServicesModule):
+    def __init__(self):
+        super().__init__(
+            argument_spec=dict(
+                project_name=dict(type="str", required=False),
+                project_id=dict(type="str", required=False),
+                name=dict(type="str", required=False),
+                id=dict(type="str", required=False, aliases=["application_id"]),
+                auth=dict(type="bool", required=False, aliases=["auth_enabled"]),
+                cpu=dict(type="float", required=False),
+                desc=dict(type="str", required=False, aliases=["description"]),
+                env=dict(type="dict", required=False, aliases=["env_vars"]),
+                kernel=dict(
+                    type="str",
+                    required=False,
+                    choices=["python3", "python2", "r", "scala"],
+                ),
+                memory=dict(type="float", required=False),
+                gpu=dict(type="int", required=False, aliases=["nvidia_gpu"]),
+                addons=dict(
+                    type="list",
+                    elements="str",
+                    required=False,
+                    aliases=["runtime_addons", "runtime_addon_identifiers"],
+                ),
+                runtime=dict(
+                    type="str",
+                    required=False,
+                    aliases=["runtime_image_id", "runtime_identifier"],
+                ),
+                script=dict(type="str", required=False),
+                subdomain=dict(type="str", required=False),
+                state=dict(
+                    type="str",
+                    required=False,
+                    choices=["present", "restarted", "stopped", "absent"],
+                    default="present",
+                ),
+            ),
+            mutually_exclusive=[
+                ["name", "id"],
+                ["project_name", "project_id"],
+            ],
+            required_one_of=[
+                ["name", "id"],
+                ["project_name", "project_id"],
+            ],
+            supports_check_mode=True,
+        )
 
         # Set parameters
-        self.project_name = self._get_param("project_name")
-        self.project_id = self._get_param("project_id")
-        self.name = self._get_param("name")
-        self.id = self._get_param("id")
-        self.auth = self._get_param("auth")
-        self.cpu = self._get_param("cpu")
-        self.creator = self._get_param("creator")
-        self.desc = self._get_param("desc")
-        self.env = self._get_param("env")
-        self.kernel = self._get_param("kernel")
-        self.memory = self._get_param("memory")
-        self.gpu = self._get_param("gpu")
-        self.addons = self._get_param("addons")
-        self.runtime = self._get_param("runtime")
-        self.script = self._get_param("script")
-        self.subdomain = self._get_param("subdomain")
-        self.state = self._get_param("state")
+        self.project_name = self.get_param("project_name")
+        self.project_id = self.get_param("project_id")
+        self.name = self.get_param("name")
+        self.id = self.get_param("id")
+        self.auth = self.get_param("auth")
+        self.cpu = self.get_param("cpu")
+        self.desc = self.get_param("desc")
+        self.env = self.get_param("env")
+        self.kernel = self.get_param("kernel")
+        self.memory = self.get_param("memory")
+        self.gpu = self.get_param("gpu")
+        self.addons = self.get_param("addons")
+        self.runtime = self.get_param("runtime")
+        self.script = self.get_param("script")
+        self.subdomain = self.get_param("subdomain")
+        self.state = self.get_param("state")
 
         # Initialize the return values
         self.changed = False
-        self.application = {}
+        self.diff = {}
+        self.application: Optional[MlApplication] = None
 
-        # Execute logic process
-        self.process()
-
-    @MLModule.process_debug
-    def process(self):
-        project = None
+    def _resolve_project_id(self) -> str:
+        client = MlProjectClient(self.api_client)
+        project: Optional[MlProject] = None
         if self.project_id:
             if not validate_project_id(self.project_id):
-                self.module.fail_json(msg="Invalid Project ID: " + self.id)
-            project = self.get_project(self.project_id)
+                self.module.fail_json(msg="Invalid Project ID: %s" % self.project_id)
+            project = client.describe_project(self.project_id)
         else:
-            project = self.find_project(self.project_name)
-
+            project = next(
+                (p for p in client.list_projects() if p.name == self.project_name),
+                None,
+            )
         if not project:
             self.module.fail_json(msg="Project not found")
+        if not isinstance(project.id, str):
+            self.module.fail_json(msg="Project ID is invalid from resolved project.")
+        return project.id
 
-        existing = None
+    def _merged_environment(self, existing: MlApplication) -> Any:
+        if self.env is None:
+            return existing.environment
+        current = existing.environment
+        if not isinstance(current, dict):
+            current = {}
+        return {**current, **self.env}
+
+    def _incoming_application(self) -> MlApplication:
+        incoming = MlApplication(name=self.name)
+        if self.desc is not None:
+            incoming.description = self.desc
+        if self.script is not None:
+            incoming.script = self.script
+        if self.subdomain is not None:
+            incoming.subdomain = self.subdomain
+        if self.kernel is not None:
+            incoming.kernel = self.kernel
+        if self.cpu is not None:
+            incoming.cpu = self.cpu
+        if self.memory is not None:
+            incoming.memory = self.memory
+        if self.gpu is not None:
+            incoming.nvidia_gpu = self.gpu
+        if self.runtime is not None:
+            incoming.runtime_identifier = self.runtime
+        if self.addons is not None:
+            incoming.runtime_addon_identifiers = self.addons
+        if self.auth is not None:
+            incoming.bypass_authentication = not self.auth
+        if self.env is not None:
+            incoming.environment = self.env
+        return incoming
+
+    def process(self) -> None:
+        project_id = self._resolve_project_id()
+        client = MlApplicationClient(self.api_client)
+
+        existing: Optional[MlApplication] = None
         if self.id:
-            existing = self.get_application(project["id"], self.id)
+            existing = client.describe_application(project_id, self.id)
         else:
-            existing = self.find_application(project["id"], self.name)
-
-        if self.state in ["present", "restarted", "stopped"]:
-            payload = dict()
-            # Create or update
-            if self.name:
-                payload.update(name=self.name)
-            if self.auth is not None:
-                payload.update(bypass_authentication=not self.auth)  # Note negation
-            if self.cpu:
-                payload.update(cpu=self.cpu)
-            if self.creator:
-                payload.update(creator=self.creator)
-            if self.desc:
-                payload.update(description=self.desc)
-            if self.kernel:
-                payload.update(kernel=self.kernel)
-            if self.memory:
-                payload.update(memory=self.memory)
-            if self.gpu:
-                payload.update(nvidia_gpu=self.gpu)
-            if self.addons:
-                payload.update(runtime_addon_identifiers=self.addons)
-            if self.runtime:
-                payload.update(runtime_identifier=self.runtime)
-            if self.script:
-                payload.update(script=self.script)
-            if self.subdomain:
-                if not validate_subdomain(self.subdomain):
-                    self.module.fail_json(msg="Invalid subdomain format")
-                payload.update(subdomain=self.subdomain)
-
-            if existing:
-                if self.env:
-                    payload.update(
-                        environment=json.dumps(self.env, separators=(",", ":")),
-                    )
-                diff = difference(payload, existing)
-
-                if diff and not self.module.check_mode:
-                    # Update the application
-                    self.changed = True
-                    self.application = self.query(
-                        method="PATCH",
-                        api=["projects", project["id"], "applications", existing["id"]],
-                        body=diff,
-                    )
-                else:
-                    self.application = existing
-
-                if (
-                    self.state == "restarted"
-                ):  # TODO Check existing status, i.e. and existing['status'] == ???
-                    # Force restart the application
-                    self.application = self.query(
-                        method="POST",
-                        api=[
-                            "projects",
-                            project["id"],
-                            "applications",
-                            existing["id"] + ":restart",
-                        ],
-                    )
-                elif self.state == "stopped":  # TODO Check existing status
-                    # Stop the application
-                    self.application = self.query(
-                        method="POST",
-                        api=[
-                            "projects",
-                            project["id"],
-                            "applications",
-                            existing["id"] + ":stop",
-                        ],
-                    )
-            else:
-                # Create the application
-                if self.env:
-                    payload.update(environment=self.env)
-
-                missing_keys = set(["subdomain", "script", "runtime_identifier"]) - set(
-                    payload.keys(),
-                )
-                if missing_keys:
-                    self.module.fail_json(
-                        msg="Missing required parameters for creation: "
-                        + ", ".join(missing_keys),
-                    )
-
-                if not self.module.check_mode:
-                    self.changed = True
-                    self.application = self.query(
-                        method="POST",
-                        api=["projects", project["id"], "applications"],
-                        body=payload,
-                    )
-        elif existing and not self.module.check_mode:
-            # Delete the application
-            self.changed = True
-            self.query(
-                method="DELETE",
-                api=["projects", project["id"], "applications", existing["id"]],
+            applications = client.list_applications(project_id)
+            existing = next(
+                (a for a in applications if a.name == self.name),
+                None,
             )
+            # Subdomains are unique within the workspace, so fall back to a
+            # subdomain match. This keeps re-applies idempotent and avoids a
+            # create that would violate the unique-subdomain constraint.
+            if existing is None and self.subdomain is not None:
+                existing = next(
+                    (a for a in applications if a.subdomain == self.subdomain),
+                    None,
+                )
+
+        if self.subdomain is not None and not validate_subdomain(self.subdomain):
+            self.module.fail_json(msg="Invalid subdomain format")
+
+        if self.state == "absent":
+            if existing:
+                if not isinstance(existing.id, str):
+                    self.module.fail_json(
+                        msg="Application ID is invalid from existing application.",
+                    )
+                self.changed = True
+                if self.module._diff:
+                    self.diff = {"before": to_dict(existing), "after": None}
+                if not self.module.check_mode:
+                    client.delete_application(project_id, existing.id)
+            return
+
+        # present, restarted, and stopped all imply the application should exist.
+        if not existing:
+            missing = [k for k in CREATE_REQUIRED if self.get_param(k) is None]
+            if missing:
+                self.module.fail_json(
+                    msg="Missing required parameters for creation: %s"
+                    % ", ".join(sorted(missing)),
+                )
+
+            incoming = self._incoming_application()
+            self.changed = True
+            if self.module._diff:
+                self.diff = {"before": None, "after": to_dict(incoming)}
+            if not self.module.check_mode:
+                self.application = client.create_application(project_id, incoming)
+            else:
+                self.application = incoming
+        else:
+            # Update an existing application
+            desired = replace(
+                existing,
+                description=(
+                    self.desc if self.desc is not None else existing.description
+                ),
+                script=self.script if self.script is not None else existing.script,
+                kernel=self.kernel if self.kernel is not None else existing.kernel,
+                cpu=self.cpu if self.cpu is not None else existing.cpu,
+                memory=self.memory if self.memory is not None else existing.memory,
+                nvidia_gpu=self.gpu if self.gpu is not None else existing.nvidia_gpu,
+                runtime_identifier=(
+                    self.runtime
+                    if self.runtime is not None
+                    else existing.runtime_identifier
+                ),
+                runtime_addon_identifiers=(
+                    self.addons
+                    if self.addons is not None
+                    else existing.runtime_addon_identifiers
+                ),
+                bypass_authentication=(
+                    (not self.auth)
+                    if self.auth is not None
+                    else existing.bypass_authentication
+                ),
+                environment=self._merged_environment(existing),
+            )
+
+            prev_config, next_config = diff_dict(existing, desired)
+
+            self.application = existing
+            if prev_config or next_config:
+                self.changed = True
+                if self.module._diff:
+                    self.diff = {"before": prev_config, "after": next_config}
+                if not self.module.check_mode:
+                    self.application = client.update_application(project_id, desired)
+                else:
+                    self.application = desired
+
+        # Apply lifecycle transitions to the resolved (created or updated) application.
+        if self.state in ("restarted", "stopped") and not self.module.check_mode:
+            if self.application is None or not isinstance(self.application.id, str):
+                self.module.fail_json(
+                    msg="Application ID is invalid from resolved application.",
+                )
+            app_id = self.application.id
+            self.changed = True
+            if self.state == "restarted":
+                self.application = client.restart_application(project_id, app_id)
+            else:
+                self.application = client.stop_application(project_id, app_id)
 
 
 def main():
-    module = MLProjectApplication.ansible_module(
-        argument_spec=dict(
-            project_name=dict(required=False, type="str"),
-            project_id=dict(required=False, type="str"),
-            name=dict(required=False, type="str"),
-            id=dict(required=False, type="str", aliases=["application_id"]),
-            auth=dict(required=False, type="bool", aliases=["auth_enabled"]),
-            cpu=dict(required=False, type="float"),  # vCPU
-            creator=dict(
-                required=False,
-                type="dict",
-                options=dict(
-                    email=dict(required=False, type="str"),
-                    name=dict(required=False, type="str"),
-                    username=dict(required=False, type="str"),
-                ),
-            ),
-            desc=dict(required=False, type="str", aliases=["description"]),
-            env=dict(required=False, type="dict", aliases=["env_vars"]),
-            kernel=dict(
-                required=False,
-                type="str",
-                choices=["python3", "python2", "r", "scala"],
-            ),
-            memory=dict(required=False, type="float"),  # GB
-            gpu=dict(required=False, type="int", aliases=["nvidia_gpu"]),
-            addons=dict(
-                required=False,
-                type="list",
-                elements="str",
-                aliases=["runtime_addons", "runtime_addon_identifiers"],
-            ),
-            runtime=dict(
-                required=False,
-                type="str",
-                aliases=["runtime_image_id", "runtime_identifier"],
-            ),
-            script=dict(required=False, type="str"),
-            subdomain=dict(required=False, type="str"),
-            state=dict(
-                required=False,
-                type="str",
-                choices=["present", "restarted", "stopped", "absent"],
-                default="present",
-            ),
-        ),
-        required_one_of=[
-            ["name", "id"],
-            ["project_name", "project_id"],
-        ],
-        supports_check_mode=True,
-    )
+    result = MlProjectApplicationModule()
 
-    result = MLProjectApplication(module)
-
-    output = dict(
+    output: Dict[str, Any] = dict(
         changed=result.changed,
-        application=result.application,
+        application=to_dict(result.application) if result.application else {},
     )
 
-    if result.debug:
+    if result.debug_log:
         output.update(
             sdk_out=result.log_out,
             sdk_out_lines=result.log_lines,
         )
 
-    module.exit_json(**output)
+    result.module.exit_json(**output)
 
 
 if __name__ == "__main__":
