@@ -25,7 +25,6 @@ import pytest
 import sys
 import time
 
-from typing import Generator, Callable
 from http.cookiejar import CookieJar
 from kafka import KafkaAdminClient, KafkaProducer
 from kafka.admin import NewTopic
@@ -70,7 +69,10 @@ from ansible_collections.cloudera.services.plugins.module_utils.ml import (
     MlProjectClient,
     MlJobClient,
     MlModelClient,
+    MlApplication,
     MlApplicationClient,
+    MlFile,
+    MlProjectFileClient,
     MlRuntimeClient,
     MlRuntimeAddonClient,
 )
@@ -1160,10 +1162,17 @@ def existing_ml_project(request, ml_project_client) -> Generator[MlProject, None
     """Fixture to create a module-scoped CML project and clean it up afterwards."""
     project_name = request.path.stem
 
-    # Clean up any existing test project with the same name
+    # Clean up any existing test project with the same name. CML can 500 on
+    # project deletion during filesystem (VFS) cleanup, so tolerate leftovers
+    # rather than poisoning the run.
     for project in ml_project_client.list_projects():
         if project.name == project_name and isinstance(project.id, str):
-            ml_project_client.delete_project(project.id)
+            try:
+                ml_project_client.delete_project(project.id)
+            except Exception as e:
+                log.info(
+                    f"Failed to delete pre-existing project {project.id}: {str(e)}",
+                )
 
     project = ml_project_client.create_project(
         MlProject(
@@ -1209,3 +1218,198 @@ def deletable_ml_project(
     purge_ml_project(project)
 
     yield project
+
+
+def _ml_subdomain(value: str) -> str:
+    """Build a valid CML application subdomain from an arbitrary string."""
+    out = "".join(c if c.isalnum() else "-" for c in value.lower())
+    while "--" in out:
+        out = out.replace("--", "-")
+    return out.strip("-")[:63].strip("-") or "app"
+
+
+@pytest.fixture(scope="module")
+def ml_runtime_identifier(ml_runtime_client) -> str:
+    """Fixture to discover an available CML runtime image identifier."""
+    runtimes = ml_runtime_client.list_runtimes()
+    for runtime in runtimes:
+        if isinstance(runtime.image_identifier, str):
+            return runtime.image_identifier
+    pytest.skip("No CML runtime image identifier available")
+
+
+@pytest.fixture
+def purge_ml_application(
+    ml_application_client,
+) -> Generator[Callable[[str, MlApplication], MlApplication], None, None]:
+    """Factory fixture to register CML applications for cleanup after the test."""
+    applications: List[tuple] = []
+
+    def _add_application(project_id: str, application: MlApplication) -> MlApplication:
+        applications.append((project_id, application))
+        return application
+
+    yield _add_application
+
+    # Clean up after the test
+    for project_id, application in applications:
+        try:
+            if isinstance(application.id, str):
+                ml_application_client.delete_application(project_id, application.id)
+        except Exception as e:
+            log.info(
+                f"Failed to delete application {application.id} during cleanup: {str(e)}",
+            )
+
+
+@pytest.fixture(scope="module")
+def existing_ml_application(
+    existing_ml_project,
+    ml_application_client,
+    ml_runtime_identifier,
+    ml_project_script,
+) -> Generator[MlApplication, None, None]:
+    """Fixture to create a module-scoped CML application and clean it up afterwards."""
+    name = "existing-app"
+    # Subdomains are unique across the workspace, so derive from the per-run
+    # project id to avoid colliding with leftovers from earlier runs.
+    subdomain = _ml_subdomain(f"existing-{existing_ml_project.id}")
+
+    # Clean up any existing test application with the same name
+    for app in ml_application_client.list_applications(existing_ml_project.id):
+        if app.name == name and isinstance(app.id, str):
+            ml_application_client.delete_application(existing_ml_project.id, app.id)
+
+    application = ml_application_client.create_application(
+        existing_ml_project.id,
+        MlApplication(
+            name=name,
+            subdomain=subdomain,
+            script=ml_project_script,
+            runtime_identifier=ml_runtime_identifier,
+        ),
+    )
+
+    yield application
+
+    # Clean up after the test (module scope, cannot use purge_ml_application fixture)
+    try:
+        if isinstance(application.id, str):
+            ml_application_client.delete_application(
+                existing_ml_project.id,
+                application.id,
+            )
+    except Exception as e:
+        log.info(
+            f"Failed to delete application {application.id} during cleanup: {str(e)}",
+        )
+
+
+@pytest.fixture()
+def deletable_ml_application(
+    request,
+    existing_ml_project,
+    ml_application_client,
+    ml_runtime_identifier,
+    ml_project_script,
+    purge_ml_application,
+) -> Generator[MlApplication, None, None]:
+    """Fixture to create a function-scoped CML application and clean it up if needed."""
+    name = f"del-{request.node.name.lower()}"[:100]
+    # Subdomains are unique across the workspace; include the per-run project id.
+    subdomain = _ml_subdomain(f"{request.node.name}-{existing_ml_project.id}")
+
+    # Clean up any existing test application with the same name
+    for app in ml_application_client.list_applications(existing_ml_project.id):
+        if app.name == name and isinstance(app.id, str):
+            ml_application_client.delete_application(existing_ml_project.id, app.id)
+
+    application = ml_application_client.create_application(
+        existing_ml_project.id,
+        MlApplication(
+            name=name,
+            subdomain=subdomain,
+            script=ml_project_script,
+            runtime_identifier=ml_runtime_identifier,
+        ),
+    )
+
+    # Register for deletion after test
+    purge_ml_application(existing_ml_project.id, application)
+
+    yield application
+
+
+@pytest.fixture(scope="module")
+def ml_project_file_client(ml_rest_client) -> MlProjectFileClient:
+    """Fixture to create an MlProjectFileClient instance."""
+    return MlProjectFileClient(api_client=ml_rest_client)
+
+
+@pytest.fixture
+def purge_ml_file(
+    ml_project_file_client,
+) -> Generator[Callable[[str, str], str], None, None]:
+    """Factory fixture to register CML project files for cleanup after the test."""
+    files: List[tuple] = []
+
+    def _add_file(project_id: str, path: str) -> str:
+        files.append((project_id, path))
+        return path
+
+    yield _add_file
+
+    # Clean up after the test
+    for project_id, path in files:
+        try:
+            ml_project_file_client.delete_file(project_id, path)
+        except Exception as e:
+            log.info(f"Failed to delete file {path} during cleanup: {str(e)}")
+
+
+@pytest.fixture(scope="module")
+def existing_ml_file(
+    existing_ml_project,
+    ml_project_file_client,
+) -> Generator[MlFile, None, None]:
+    """Fixture to upload a module-scoped project file and clean it up afterwards."""
+    path = "pytest-existing.py"
+    ml_project_file_client.upload_file(
+        existing_ml_project.id,
+        path,
+        content="# created by pytest\nprint('existing')\n",
+    )
+
+    yield MlFile(path=path)
+
+    try:
+        ml_project_file_client.delete_file(existing_ml_project.id, path)
+    except Exception as e:
+        log.info(f"Failed to delete file {path} during cleanup: {str(e)}")
+
+
+@pytest.fixture(scope="module")
+def ml_project_script(
+    existing_ml_project,
+    ml_project_file_client,
+) -> Generator[str, None, None]:
+    """Fixture ensuring an entrypoint script exists in the project for applications.
+
+    CML rejects application creation when the entrypoint script is not a real
+    file within the project, so applications must seed this first. The file is
+    removed on teardown (before the enclosing project is deleted) to keep the
+    project filesystem clean for deletion.
+    """
+    path = "app.py"
+    ml_project_file_client.upload_file(
+        existing_ml_project.id,
+        path,
+        content="# created by pytest\nprint('app')\n",
+    )
+
+    yield path
+
+    try:
+        ml_project_file_client.delete_file(existing_ml_project.id, path)
+    except Exception as e:
+        log.info(f"Failed to delete script {path} during cleanup: {str(e)}")

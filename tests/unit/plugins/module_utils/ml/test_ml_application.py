@@ -115,3 +115,29 @@ def test_delete_application(mocker):
     api_client.delete.assert_called_once_with(
         f"/{API_VERSION}/projects/{PROJECT_ID}/applications/app-1",
     )
+
+
+def test_restart_application(mocker):
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.post.return_value = APPLICATION
+
+    client = MlApplicationClient(api_client=api_client)
+    response = client.restart_application(PROJECT_ID, "app-1")
+
+    assert response == from_dict(MlApplication, APPLICATION)
+    api_client.post.assert_called_once_with(
+        f"/{API_VERSION}/projects/{PROJECT_ID}/applications/app-1:restart",
+    )
+
+
+def test_stop_application(mocker):
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.post.return_value = APPLICATION
+
+    client = MlApplicationClient(api_client=api_client)
+    response = client.stop_application(PROJECT_ID, "app-1")
+
+    assert response == from_dict(MlApplication, APPLICATION)
+    api_client.post.assert_called_once_with(
+        f"/{API_VERSION}/projects/{PROJECT_ID}/applications/app-1:stop",
+    )

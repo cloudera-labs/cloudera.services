@@ -565,9 +565,11 @@ class MlApplication:
     memory: Union[float, None, NULLABLE] = NULLABLE
     nvidia_gpu: Union[int, None, NULLABLE] = NULLABLE
     runtime_identifier: Union[str, None, NULLABLE] = NULLABLE
+    runtime_addon_identifiers: Union[List[str], None, NULLABLE] = NULLABLE
     bypass_authentication: Union[bool, None, NULLABLE] = NULLABLE
     environment: Union[Dict[str, Any], str, None, NULLABLE] = NULLABLE
     status: Union[str, None, NULLABLE] = NULLABLE
+    creator: Union[Dict[str, Any], None, NULLABLE] = NULLABLE
     created_at: Union[str, None, NULLABLE] = NULLABLE
     updated_at: Union[str, None, NULLABLE] = NULLABLE
 
@@ -631,6 +633,90 @@ class MlApplicationClient:
     def delete_application(self, project_id: str, application_id: str) -> None:
         self.api_client.delete(
             f"/{API_VERSION}/projects/{project_id}/applications/{application_id}",
+        )
+
+    def restart_application(
+        self,
+        project_id: str,
+        application_id: str,
+    ) -> MlApplication:
+        """Restart an application."""
+        return from_dict(
+            MlApplication,
+            self.api_client.post(
+                f"/{API_VERSION}/projects/{project_id}/applications/{application_id}:restart",
+            ),
+        )
+
+    def stop_application(
+        self,
+        project_id: str,
+        application_id: str,
+    ) -> MlApplication:
+        """Stop an application."""
+        return from_dict(
+            MlApplication,
+            self.api_client.post(
+                f"/{API_VERSION}/projects/{project_id}/applications/{application_id}:stop",
+            ),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Files
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class MlFile:
+    """A file or directory within a CML project."""
+
+    path: str
+    is_dir: Union[bool, None, NULLABLE] = NULLABLE
+    file_size: Union[str, None, NULLABLE] = NULLABLE
+
+
+class MlProjectFileClient:
+    """CML Project Files API client."""
+
+    def __init__(self, api_client: ServicesClient) -> None:
+        self.api_client: ServicesClient = api_client
+
+    def list_files(self, project_id: str, path: str = "") -> List[MlFile]:
+        """List the files/directories within a project path."""
+        resp = self.api_client.get(
+            f"/{API_VERSION}/projects/{project_id}/files/{path}",
+            squelch={403: None, 404: None},
+        )
+        return [from_dict(MlFile, f) for f in (resp or {}).get("files", [])]
+
+    def upload_file(
+        self,
+        project_id: str,
+        path: str,
+        content: Optional[str] = None,
+        src: Optional[str] = None,
+    ) -> None:
+        """Upload a file to a project.
+
+        The multipart form field name is the destination path (relative to the
+        project root), matching the CML API's ``UploadFile`` contract.
+        """
+        if src is not None:
+            part: Dict[str, Any] = {"filename": src}
+        else:
+            part = {"content": content or "", "filename": path.rsplit("/", 1)[-1]}
+
+        self.api_client.post(
+            f"/{API_VERSION}/projects/{project_id}/files",
+            data={path: part},
+            format="multipart",
+        )
+
+    def delete_file(self, project_id: str, path: str) -> None:
+        """Delete a file from a project."""
+        self.api_client.delete(
+            f"/{API_VERSION}/projects/{project_id}/files/{path}",
         )
 
 
