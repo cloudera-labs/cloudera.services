@@ -15,163 +15,284 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
+DOCUMENTATION = r"""
+module: ml_project_model_info
+short_description: Retrieve information about Cloudera Machine Learning (CML) project models
+description:
+  - Retrieve information about one or more Cloudera Machine Learning (CML) project models.
+  - The module can list all models within a project or filter by a number of criteria.
+  - The module supports C(check_mode).
+author:
+  - "Webster Mudge (@wmudge)"
+version_added: "1.0.0"
+options:
+  project_name:
+    description:
+      - The name of the enclosing project.
+      - Mutually exclusive with O(project_id).
+    type: str
+    required: false
+  project_id:
+    description:
+      - The unique identifier of the enclosing project.
+      - Mutually exclusive with O(project_name).
+    type: str
+    required: false
+  id:
+    description:
+      - The unique identifier of a single model to retrieve.
+    type: str
+    required: false
+    aliases:
+      - model_id
+  name:
+    description:
+      - Filter the models by name.
+    type: str
+    required: false
+    aliases:
+      - model
+  desc:
+    description:
+      - Filter the models by description.
+    type: str
+    required: false
+    aliases:
+      - description
+  auth:
+    description:
+      - Filter the models by whether authentication is enabled.
+    type: bool
+    required: false
+    aliases:
+      - auth_enabled
+  creator:
+    description:
+      - Filter the models by creator details.
+    type: dict
+    required: false
+    suboptions:
+      name:
+        description:
+          - The display name of the creator.
+        type: str
+        required: false
+      username:
+        description:
+          - The username of the creator.
+        type: str
+        required: false
+      email:
+        description:
+          - The email address of the creator.
+        type: str
+        required: false
+extends_documentation_fragment:
+  - cloudera.services.ml_client
+  - cloudera.services.services_client
+"""
 
-from ansible.module_utils.basic import AnsibleModule
+EXAMPLES = r"""
+- name: List all models within a project
+  cloudera.services.ml_project_model_info:
+    url: "https://ml-workspace.example.com"
+    api_key: "{{ cml_api_key }}"
+    project_name: my-project
+  register: all_models
+
+- name: Get a single model by id
+  cloudera.services.ml_project_model_info:
+    project_id: "{{ project_id }}"
+    id: "{{ model_id }}"
+
+- name: List models created by a user
+  cloudera.services.ml_project_model_info:
+    project_name: my-project
+    creator:
+      username: jdoe
+
+- name: List models with authentication enabled
+  cloudera.services.ml_project_model_info:
+    project_name: my-project
+    auth: true
+"""
+
+RETURN = r"""
+models:
+  description: List of CML models.
+  returned: always
+  type: list
+  elements: dict
+  contains:
+    id:
+      description: The unique identifier of the model.
+      type: str
+      returned: always
+    name:
+      description: The name of the model.
+      type: str
+      returned: always
+    project_id:
+      description: The identifier of the enclosing project.
+      type: str
+      returned: when available
+    description:
+      description: The description of the model.
+      type: str
+      returned: when available
+    access_key:
+      description: The access key of the model.
+      type: str
+      returned: when available
+    auth_enabled:
+      description: Whether authentication is enabled for the model.
+      type: bool
+      returned: when available
+    creator:
+      description: Details of the user that created the model.
+      type: dict
+      returned: when available
+    created_at:
+      description: The timestamp when the model was created.
+      type: str
+      returned: when available
+    updated_at:
+      description: The timestamp when the model was last updated.
+      type: str
+      returned: when available
+sdk_out:
+  description: Returns the captured REST API log.
+  returned: when supported
+  type: str
+sdk_out_lines:
+  description: Returns a list of each line of the captured REST API log.
+  returned: when supported
+  type: list
+  elements: str
+"""
+
+from typing import Any, Dict, List, Optional
+
+from ansible_collections.cloudera.services.plugins.module_utils.common import (
+    to_dict,
+)
 from ansible_collections.cloudera.services.plugins.module_utils.ml import (
-    MLModule,
+    MlServicesModule,
+    MlModel,
+    MlModelClient,
+    MlProject,
+    MlProjectClient,
     validate_project_id,
 )
 
 
-DOCUMENTATION = r"""
-module: ml_project_model_info
-short_description: Get information for Cloudera Machine Learning (CML) project models
-description:
-  - Get information for one or more Cloudera Machine Learning (CML) project models
-  - The module supports check_mode.
-  - The module supports the C(v2) API only.
-author:
-  - "Webster Mudge (@wmudge)"
-version_added: "1.0.0"
-requirements:
-  - requests
-options:
-  debug:
-    description:
-      - Flag to capture and return the debugging log of the underlying CDP SDK.
-      - If set, the log level will be set from ERROR to DEBUG.
-    aliases:
-      - debug_cdpsdk
-    default: False
-    type: bool
-extends_documentation_fragment:
-  - cloudera.services.ml_endpoint
-"""
-
-EXAMPLES = r"""
-
-"""
-
-RETURN = r"""
-sdk_out:
-    description: Returns the captured CDP SDK log.
-    returned: when supported
-    type: str
-sdk_out_lines:
-    description: Returns a list of each line of the captured CDP SDK log.
-    returned: when supported
-    type: list
-    elements: str
-"""
-
-
-class MLProjectModelInfo(MLModule):
-    def __init__(self, module):
-        super(MLProjectModelInfo, self).__init__(module)
+class MlProjectModelInfoModule(MlServicesModule):
+    def __init__(self):
+        super().__init__(
+            argument_spec=dict(
+                project_name=dict(type="str", required=False),
+                project_id=dict(type="str", required=False),
+                id=dict(type="str", required=False, aliases=["model_id"]),
+                name=dict(type="str", required=False, aliases=["model"]),
+                desc=dict(type="str", required=False, aliases=["description"]),
+                auth=dict(type="bool", required=False, aliases=["auth_enabled"]),
+                creator=dict(
+                    type="dict",
+                    required=False,
+                    options=dict(
+                        name=dict(type="str", required=False),
+                        username=dict(type="str", required=False),
+                        email=dict(type="str", required=False),
+                    ),
+                ),
+            ),
+            mutually_exclusive=[["project_name", "project_id"]],
+            required_one_of=[["project_name", "project_id"]],
+            supports_check_mode=True,
+        )
 
         # Set parameters
-        self.project_name = self._get_param("project_name")
-        self.project_id = self._get_param("project_id")
-        self.name = self._get_param("name")
-        self.id = self._get_param("id")
-        self.auth = self._get_param("auth")
-        self.creator_email = self._get_param("creator", "email")
-        self.creator_name = self._get_param("creator", "name")
-        self.creator_username = self._get_param("creator", "username")
-        self.desc = self._get_param("desc")
+        self.project_name = self.get_param("project_name")
+        self.project_id = self.get_param("project_id")
+        self.id = self.get_param("id")
+        self.name = self.get_param("name")
+        self.desc = self.get_param("desc")
+        self.auth = self.get_param("auth")
+        self.creator = self.get_param("creator")
 
-        # Initialize the return values
-        self.models = []
+        # Initialize result variables
+        self.model_list: List[MlModel] = []
 
-        # Execute logic process
-        self.process()
-
-    @MLModule.process_debug
-    def process(self):
+    def _resolve_project_id(self) -> str:
+        client = MlProjectClient(self.api_client)
+        project: Optional[MlProject] = None
         if self.project_id:
             if not validate_project_id(self.project_id):
-                self.module.fail_json(msg="Invalid Project ID: " + self.project_id)
-            project = self.get_project(self.project_id)
+                self.module.fail_json(msg="Invalid Project ID: %s" % self.project_id)
+            project = client.describe_project(self.project_id)
         else:
-            project = self.find_project(self.project_name)
-
+            project = next(
+                (p for p in client.list_projects() if p.name == self.project_name),
+                None,
+            )
         if not project:
             self.module.fail_json(msg="Project not found")
+        if not isinstance(project.id, str):
+            self.module.fail_json(msg="Project ID is invalid from resolved project.")
+        return project.id
+
+    def _matches(self, model: MlModel) -> bool:
+        checks = {
+            "name": self.name,
+            "description": self.desc,
+        }
+        for attr, wanted in checks.items():
+            if wanted is not None and getattr(model, attr) != wanted:
+                return False
+
+        if self.auth is not None and model.auth_enabled != self.auth:
+            return False
+
+        if self.creator:
+            creator = model.creator
+            if not isinstance(creator, dict):
+                return False
+            for key, wanted in self.creator.items():
+                if wanted is not None and creator.get(key) != wanted:
+                    return False
+
+        return True
+
+    def process(self) -> None:
+        project_id = self._resolve_project_id()
+        client = MlModelClient(self.api_client)
 
         if self.id:
-            self.models = [self.get_model(project["id"], self.id)]
-        else:
-            search_filter = dict()
-            if self.auth is not None:
-                search_filter["auth_enabled"] = str(self.auth)
-            if self.creator_email:
-                search_filter["creator.email"] = self.creator_email
-            if self.creator_name:
-                search_filter["creator.name"] = self.creator_name
-            if self.creator_username:
-                search_filter["creator.username"] = self.creator_username
-            if self.desc:
-                search_filter["description"] = self.desc
-            if self.name:
-                search_filter["name"] = self.name
+            model = client.describe_model(project_id, self.id)
+            if model:
+                self.model_list.append(model)
+            return
 
-            query = dict(
-                method="GET",
-                api=["projects", project["id"], "models"],
-                field="models",
-            )
-
-            if search_filter:
-                self.models = self.query(
-                    **query,
-                    params=dict(
-                        search_filter=json.dumps(search_filter, separators=(",", ":")),
-                    ),
-                )
-            else:
-                self.models = self.query(**query)
+        self.model_list = [
+            m for m in client.list_models(project_id) if self._matches(m)
+        ]
 
 
 def main():
-    module = MLProjectModelInfo.ansible_module(
-        argument_spec=dict(
-            project_name=dict(required=False, type="str"),
-            project_id=dict(required=False, type="str"),
-            name=dict(required=False, type="str", aliases=["model"]),
-            id=dict(required=False, type="str", aliases=["model_id"]),
-            auth=dict(required=False, type="bool", aliases=["auth_enabled"]),
-            creator=dict(
-                required=False,
-                type="dict",
-                options=dict(
-                    email=dict(required=False, type="str"),
-                    name=dict(required=False, type="str"),
-                    username=dict(required=False, type="str"),
-                ),
-            ),
-            desc=dict(required=False, type="str"),
-        ),
-        required_one_of=[
-            ["project_name", "project_id"],
-        ],
-        supports_check_mode=True,
+    result = MlProjectModelInfoModule()
+
+    output: Dict[str, Any] = dict(
+        changed=False,
+        models=[to_dict(model) for model in result.model_list],
     )
 
-    result = MLProjectModelInfo(module)
-
-    output = dict(
-        changed=result.changed,
-        models=result.models,
-    )
-
-    if result.debug:
+    if result.debug_log:
         output.update(
             sdk_out=result.log_out,
             sdk_out_lines=result.log_lines,
         )
 
-    module.exit_json(**output)
+    result.module.exit_json(**output)
 
 
 if __name__ == "__main__":
