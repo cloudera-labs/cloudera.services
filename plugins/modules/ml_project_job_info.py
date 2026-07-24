@@ -15,175 +15,329 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
-
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.cloudera.services.plugins.module_utils.ml import (
-    MLModule,
-    validate_project_id,
-)
-
-ANSIBLE_METADATA = {
-    "metadata_version": "1.1",
-    "status": ["preview"],
-    "supported_by": "community",
-}
-
 DOCUMENTATION = r"""
----
 module: ml_project_job_info
-short_description: Get information for Cloudera Machine Learning (CML) project jobs
+short_description: Retrieve information about Cloudera Machine Learning (CML) project jobs
 description:
-  - Get information for the available Cloudera Machine Learning (CML) project jobs.
-  - The module supports check_mode.
-  - The module supports the C(v2) API only.
+  - Retrieve information about one or more Cloudera Machine Learning (CML) project jobs.
+  - The module can list all jobs within a project or filter by a number of criteria.
+  - The module supports C(check_mode).
 author:
   - "Webster Mudge (@wmudge)"
 version_added: "1.0.0"
-requirements:
-  - requests
 options:
-  debug:
+  project_name:
     description:
-      - Flag to capture and return the debugging log of the underlying CDP SDK.
-      - If set, the log level will be set from ERROR to DEBUG.
+      - The name of the enclosing project.
+      - Mutually exclusive with O(project_id).
+    type: str
+    required: false
+  project_id:
+    description:
+      - The unique identifier of the enclosing project.
+      - Mutually exclusive with O(project_name).
+    type: str
+    required: false
+  id:
+    description:
+      - The unique identifier of a single job to retrieve.
+    type: str
+    required: false
     aliases:
-      - debug_cdpsdk
-    default: False
+      - job_id
+  name:
+    description:
+      - Filter the jobs by name.
+    type: str
+    required: false
+  kernel:
+    description:
+      - Filter the jobs by kernel.
+    type: str
+    required: false
+  script:
+    description:
+      - Filter the jobs by entrypoint script.
+    type: str
+    required: false
+  paused:
+    description:
+      - Filter the jobs by paused state.
     type: bool
+    required: false
+  creator:
+    description:
+      - Filter the jobs by creator details.
+    type: dict
+    required: false
+    suboptions:
+      name:
+        description:
+          - The display name of the creator.
+        type: str
+        required: false
+      username:
+        description:
+          - The username of the creator.
+        type: str
+        required: false
+      email:
+        description:
+          - The email address of the creator.
+        type: str
+        required: false
+extends_documentation_fragment:
+  - cloudera.services.ml_client
+  - cloudera.services.services_client
 """
 
 EXAMPLES = r"""
+- name: List all jobs within a project
+  cloudera.services.ml_project_job_info:
+    url: "https://ml-workspace.example.com"
+    api_key: "{{ cml_api_key }}"
+    project_name: my-project
+  register: all_jobs
 
+- name: Get a single job by id
+  cloudera.services.ml_project_job_info:
+    project_id: "{{ project_id }}"
+    id: "{{ job_id }}"
+
+- name: List jobs created by a user
+  cloudera.services.ml_project_job_info:
+    project_name: my-project
+    creator:
+      username: jdoe
+
+- name: List paused jobs
+  cloudera.services.ml_project_job_info:
+    project_name: my-project
+    paused: true
 """
 
 RETURN = r"""
----
+jobs:
+  description: List of CML jobs.
+  returned: always
+  type: list
+  elements: dict
+  contains:
+    id:
+      description: The unique identifier of the job.
+      type: str
+      returned: always
+    name:
+      description: The name of the job.
+      type: str
+      returned: always
+    project_id:
+      description: The identifier of the enclosing project.
+      type: str
+      returned: when available
+    script:
+      description: The entrypoint script for the job.
+      type: str
+      returned: when available
+    arguments:
+      description: The command-line arguments passed to the job script.
+      type: str
+      returned: when available
+    kernel:
+      description: The kernel for the job.
+      type: str
+      returned: when available
+    cpu:
+      description: The vCPU allocated to the job.
+      type: float
+      returned: when available
+    memory:
+      description: The RAM allocated to the job, in GB.
+      type: float
+      returned: when available
+    nvidia_gpu:
+      description: The count of Nvidia GPUs allocated to the job.
+      type: int
+      returned: when available
+    runtime_identifier:
+      description: The container runtime identifier for the job.
+      type: str
+      returned: when available
+    runtime_addon_identifiers:
+      description: The runtime addon identifiers for the job.
+      type: list
+      elements: str
+      returned: when available
+    schedule:
+      description: The cron schedule for the job.
+      type: str
+      returned: when available
+    parent_job_id:
+      description: The identifier of the parent job that triggers this job.
+      type: str
+      returned: when available
+    timeout:
+      description: The job timeout, in seconds.
+      type: int
+      returned: when available
+    kill_on_timeout:
+      description: Whether the job is killed on timeout.
+      type: bool
+      returned: when available
+    paused:
+      description: Whether the job schedule is paused.
+      type: bool
+      returned: when available
+    environment:
+      description: The environment variables of the job.
+      type: dict
+      returned: when available
+    creator:
+      description: Details of the user that created the job.
+      type: dict
+      returned: when available
+    created_at:
+      description: The timestamp when the job was created.
+      type: str
+      returned: when available
+    updated_at:
+      description: The timestamp when the job was last updated.
+      type: str
+      returned: when available
 sdk_out:
-    description: Returns the captured CDP SDK log.
-    returned: when supported
-    type: str
+  description: Returns the captured REST API log.
+  returned: when supported
+  type: str
 sdk_out_lines:
-    description: Returns a list of each line of the captured CDP SDK log.
-    returned: when supported
-    type: list
-    elements: str
+  description: Returns a list of each line of the captured REST API log.
+  returned: when supported
+  type: list
+  elements: str
 """
 
+from typing import Any, Dict, List, Optional
 
-class MLProjectJobInfo(MLModule):
-    def __init__(self, module):
-        super(MLProjectJobInfo, self).__init__(module)
+from ansible_collections.cloudera.services.plugins.module_utils.common import (
+    to_dict,
+)
+from ansible_collections.cloudera.services.plugins.module_utils.ml import (
+    MlServicesModule,
+    MlJob,
+    MlJobClient,
+    MlProject,
+    MlProjectClient,
+    validate_project_id,
+)
+
+
+class MlProjectJobInfoModule(MlServicesModule):
+    def __init__(self):
+        super().__init__(
+            argument_spec=dict(
+                project_name=dict(type="str", required=False),
+                project_id=dict(type="str", required=False),
+                id=dict(type="str", required=False, aliases=["job_id"]),
+                name=dict(type="str", required=False),
+                kernel=dict(type="str", required=False),
+                script=dict(type="str", required=False),
+                paused=dict(type="bool", required=False),
+                creator=dict(
+                    type="dict",
+                    required=False,
+                    options=dict(
+                        name=dict(type="str", required=False),
+                        username=dict(type="str", required=False),
+                        email=dict(type="str", required=False),
+                    ),
+                ),
+            ),
+            mutually_exclusive=[["project_name", "project_id"]],
+            required_one_of=[["project_name", "project_id"]],
+            supports_check_mode=True,
+        )
 
         # Set parameters
-        self.project_name = self._get_param("project_name")
-        self.project_id = self._get_param("project_id")
-        self.creator_email = self._get_param("creator", "email")
-        self.creator_name = self._get_param("creator", "name")
-        self.creator_username = self._get_param("creator", "username")
-        self.name = self._get_param("name")
-        self.kernel = self._get_param("kernel")
-        self.paused = self._get_param("paused")
-        self.desc = self._get_param("desc")
-        self.script = self._get_param("script")
-        self.type = self._get_param("type")
+        self.project_name = self.get_param("project_name")
+        self.project_id = self.get_param("project_id")
+        self.id = self.get_param("id")
+        self.name = self.get_param("name")
+        self.kernel = self.get_param("kernel")
+        self.script = self.get_param("script")
+        self.paused = self.get_param("paused")
+        self.creator = self.get_param("creator")
 
-        # Initialize the return values
-        self.jobs = []
+        # Initialize result variables
+        self.job_list: List[MlJob] = []
 
-        # Execute logic process
-        self.process()
-
-    @MLModule.process_debug
-    def process(self):
+    def _resolve_project_id(self) -> str:
+        client = MlProjectClient(self.api_client)
+        project: Optional[MlProject] = None
         if self.project_id:
             if not validate_project_id(self.project_id):
-                self.module.fail_json(msg="Invalid Project ID: " + self.project_id)
-            project = self.get_project(self.project_id)
+                self.module.fail_json(msg="Invalid Project ID: %s" % self.project_id)
+            project = client.describe_project(self.project_id)
         else:
-            project = self.find_project(self.project_name)
-
+            project = next(
+                (p for p in client.list_projects() if p.name == self.project_name),
+                None,
+            )
         if not project:
             self.module.fail_json(msg="Project not found")
+        if not isinstance(project.id, str):
+            self.module.fail_json(msg="Project ID is invalid from resolved project.")
+        return project.id
 
-        search_filter = dict()
-        if self.creator_email:
-            search_filter["creator.email"] = self.creator_email
-        if self.creator_name:
-            search_filter["creator.name"] = self.creator_name
-        if self.creator_username:
-            search_filter["creator.username"] = self.creator_username
-        if self.name:
-            search_filter["name"] = self.name
-        if self.kernel:
-            search_filter["kernel"] = self.kernel
-        if self.paused is not None:
-            search_filter["paused"] = self.paused
-        if self.desc:
-            search_filter["description"] = self.desc
-        if self.script:
-            search_filter["script"] = self.script
-        if self.type:
-            search_filter["type"] = self.type
+    def _matches(self, job: MlJob) -> bool:
+        checks = {
+            "name": self.name,
+            "kernel": self.kernel,
+            "script": self.script,
+        }
+        for attr, wanted in checks.items():
+            if wanted is not None and getattr(job, attr) != wanted:
+                return False
 
-        if search_filter:
-            query_params = dict(
-                search_filter=json.dumps(search_filter, separators=(",", ":")),
-            )
-            self.jobs = self.query(
-                method="GET",
-                api=["projects", project["id"], "jobs"],
-                field="jobs",
-                params=query_params,
-            )
-        else:
-            self.jobs = self.query(
-                method="GET",
-                api=["projects", project["id"], "jobs"],
-                field="jobs",
-            )
+        if self.paused is not None and job.paused != self.paused:
+            return False
+
+        if self.creator:
+            creator = job.creator
+            if not isinstance(creator, dict):
+                return False
+            for key, wanted in self.creator.items():
+                if wanted is not None and creator.get(key) != wanted:
+                    return False
+
+        return True
+
+    def process(self) -> None:
+        project_id = self._resolve_project_id()
+        client = MlJobClient(self.api_client)
+
+        if self.id:
+            job = client.describe_job(project_id, self.id)
+            if job:
+                self.job_list.append(job)
+            return
+
+        self.job_list = [j for j in client.list_jobs(project_id) if self._matches(j)]
 
 
 def main():
-    module = MLProjectJobInfo.ansible_module(
-        argument_spec=dict(
-            project_name=dict(required=False, type="str"),
-            project_id=dict(required=False, type="str"),
-            creator=dict(
-                required=False,
-                type="dict",
-                options=dict(
-                    name=dict(required=False, type="str"),
-                    username=dict(required=False, type="str"),
-                    email=dict(required=False, type="str"),
-                ),
-            ),
-            name=dict(required=False, type="str"),
-            kernel=dict(required=False, type="str"),
-            paused=dict(required=False, type="bool"),
-            desc=dict(required=False, type="str", aliases=["description"]),
-            script=dict(required=False, type="str"),
-            type=dict(required=False, type="str"),
-        ),
-        required_one_of=[("project_name", "project_id")],
-        mutually_exclusive=[("project_name", "project_id")],
-        supports_check_mode=True,
-    )
+    result = MlProjectJobInfoModule()
 
-    result = MLProjectJobInfo(module)
-
-    output = dict(
+    output: Dict[str, Any] = dict(
         changed=False,
-        jobs=result.jobs,
+        jobs=[to_dict(job) for job in result.job_list],
     )
 
-    if result.debug:
+    if result.debug_log:
         output.update(
             sdk_out=result.log_out,
             sdk_out_lines=result.log_lines,
         )
 
-    module.exit_json(**output)
+    result.module.exit_json(**output)
 
 
 if __name__ == "__main__":

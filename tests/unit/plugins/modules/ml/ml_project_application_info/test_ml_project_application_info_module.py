@@ -85,7 +85,10 @@ def _base_args(overrides=None):
 def test_list_all(module_args, mocker):
     """List every application in the project."""
     _mock_project(mocker)
-    mock_list = mocker.patch(f"{APPS}.list_applications", return_value=[APP_ONE, APP_TWO])
+    mock_list = mocker.patch(
+        f"{APPS}.list_applications",
+        return_value=[APP_ONE, APP_TWO],
+    )
 
     module_args(_base_args())
 

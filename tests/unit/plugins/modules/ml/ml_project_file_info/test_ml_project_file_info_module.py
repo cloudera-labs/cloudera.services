@@ -49,7 +49,10 @@ def test_list_root(module_args, mocker):
     _mock_project(mocker)
     mock_list = mocker.patch(
         f"{FILES}.list_files",
-        return_value=[MlFile(path="app.py", is_dir=False), MlFile(path="src", is_dir=True)],
+        return_value=[
+            MlFile(path="app.py", is_dir=False),
+            MlFile(path="src", is_dir=True),
+        ],
     )
 
     module_args({"url": BASE_URL, "api_key": API_KEY, "project_name": "proj"})
