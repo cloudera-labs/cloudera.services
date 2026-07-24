@@ -85,3 +85,16 @@ def test_create_job_run(mocker):
         f"/{API_VERSION}/projects/{PROJECT_ID}/jobs/{JOB_ID}/runs",
         data={"status": "scheduling"},
     )
+
+
+def test_stop_job_run(mocker):
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.post.return_value = JOB_RUN
+
+    client = MlJobRunClient(api_client=api_client)
+    response = client.stop_job_run(PROJECT_ID, JOB_ID, "run-1")
+
+    assert response == from_dict(MlJobRun, JOB_RUN)
+    api_client.post.assert_called_once_with(
+        f"/{API_VERSION}/projects/{PROJECT_ID}/jobs/{JOB_ID}/runs/run-1:stop",
+    )

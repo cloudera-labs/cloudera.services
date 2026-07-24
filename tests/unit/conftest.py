@@ -69,6 +69,7 @@ from ansible_collections.cloudera.services.plugins.module_utils.ml import (
     MlProjectClient,
     MlJob,
     MlJobClient,
+    MlJobRunClient,
     MlModelClient,
     MlApplication,
     MlApplicationClient,
@@ -1110,6 +1111,12 @@ def ml_project_client(ml_rest_client) -> MlProjectClient:
 def ml_job_client(ml_rest_client) -> MlJobClient:
     """Fixture to create an MlJobClient instance."""
     return MlJobClient(api_client=ml_rest_client)
+
+
+@pytest.fixture(scope="module")
+def ml_job_run_client(ml_rest_client) -> MlJobRunClient:
+    """Fixture to create an MlJobRunClient instance."""
+    return MlJobRunClient(api_client=ml_rest_client)
 
 
 @pytest.fixture(scope="module")

@@ -287,7 +287,9 @@ class MlJobRun:
     job_id: Union[str, None, NULLABLE] = NULLABLE
     project_id: Union[str, None, NULLABLE] = NULLABLE
     status: Union[str, None, NULLABLE] = NULLABLE
+    arguments: Union[str, None, NULLABLE] = NULLABLE
     environment: Union[Dict[str, Any], str, None, NULLABLE] = NULLABLE
+    creator: Union[Dict[str, Any], None, NULLABLE] = NULLABLE
     created_at: Union[str, None, NULLABLE] = NULLABLE
     scheduling_at: Union[str, None, NULLABLE] = NULLABLE
     starting_at: Union[str, None, NULLABLE] = NULLABLE
@@ -331,6 +333,19 @@ class MlJobRunClient:
             self.api_client.post(
                 f"/{API_VERSION}/projects/{project_id}/jobs/{job_id}/runs",
                 data=to_dict(run),
+            ),
+        )
+
+    def stop_job_run(
+        self,
+        project_id: str,
+        job_id: str,
+        run_id: str,
+    ) -> MlJobRun:
+        return from_dict(
+            MlJobRun,
+            self.api_client.post(
+                f"/{API_VERSION}/projects/{project_id}/jobs/{job_id}/runs/{run_id}:stop",
             ),
         )
 
