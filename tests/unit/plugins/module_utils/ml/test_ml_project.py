@@ -143,7 +143,11 @@ def test_update_project(mocker):
 
     api_client.patch.assert_called_once_with(
         f"/{API_VERSION}/projects/aaaa-bbbb-cccc-dddd",
-        data={"name": "test-project", "id": "aaaa-bbbb-cccc-dddd", "description": "New"},
+        data={
+            "name": "test-project",
+            "id": "aaaa-bbbb-cccc-dddd",
+            "description": "New",
+        },
     )
 
 

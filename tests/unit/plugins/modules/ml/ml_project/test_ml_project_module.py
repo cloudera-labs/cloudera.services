@@ -31,7 +31,9 @@ from ansible_collections.cloudera.services.plugins.module_utils.ml import MlProj
 BASE_URL = "https://ml.cloudera.internal"
 API_KEY = "SECRET"
 
-CLIENT = "ansible_collections.cloudera.services.plugins.modules.ml_project.MlProjectClient"
+CLIENT = (
+    "ansible_collections.cloudera.services.plugins.modules.ml_project.MlProjectClient"
+)
 
 EXISTING = MlProject(
     id="aaaa-bbbb-cccc-dddd",

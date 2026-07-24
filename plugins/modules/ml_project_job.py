@@ -15,306 +15,651 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.cloudera.services.plugins.module_utils.ml import (
-    MLModule,
-    difference,
-    validate_project_id,
-)
-
-ANSIBLE_METADATA = {
-    "metadata_version": "1.1",
-    "status": ["preview"],
-    "supported_by": "community",
-}
-
 DOCUMENTATION = r"""
----
 module: ml_project_job
-short_description: Create, update, and delete a Cloudera Machine Learning (CML) project job.
+short_description: Manage a Cloudera Machine Learning (CML) project job
 description:
-  - Create, update, and delete a Cloudera Machine Learning (CML) project job.
-  - The module supports check_mode.
-  - The module supports the C(v2) API only.
+  - Create, update, or delete a Cloudera Machine Learning (CML) project job.
+  - The module supports C(check_mode).
 author:
   - "Webster Mudge (@wmudge)"
 version_added: "1.0.0"
-requirements:
-  - requests
 options:
-  debug:
+  project_name:
     description:
-      - Flag to capture and return the debugging log of the underlying CDP SDK.
-      - If set, the log level will be set from ERROR to DEBUG.
+      - The name of the enclosing project for the job.
+      - Mutually exclusive with O(project_id).
+    type: str
+    required: false
+  project_id:
+    description:
+      - The unique identifier of the enclosing project for the job.
+      - Mutually exclusive with O(project_name).
+    type: str
+    required: false
+  name:
+    description:
+      - The name of the job.
+      - Required when creating a job.
+      - Mutually exclusive with O(id).
+    type: str
+    required: false
     aliases:
-      - debug_cdpsdk
-    default: False
+      - job
+  id:
+    description:
+      - The unique identifier of an existing job.
+      - Mutually exclusive with O(name).
+    type: str
+    required: false
+    aliases:
+      - job_id
+  arguments:
+    description:
+      - The command-line arguments passed to the job script.
+    type: str
+    required: false
+  attachments:
+    description:
+      - A list of file attachments (project file paths) delivered with job run notifications.
+      - Applied only on job creation.
+    type: list
+    elements: str
+    required: false
+  cpu:
+    description:
+      - The vCPU allocated to the job.
+    type: float
+    required: false
+  env:
+    description:
+      - Environment variables to set on the job.
+      - On update, the provided variables are merged with the job's existing variables.
+    type: dict
+    required: false
+    aliases:
+      - env_vars
+  kernel:
+    description:
+      - The kernel to use for the job.
+      - Not valid for projects whose default engine type is C(ml_runtime); use O(runtime) instead.
+      - Mutually exclusive with O(runtime).
+    type: str
+    required: false
+    choices:
+      - python3
+      - python2
+      - r
+      - scala
+  kill:
+    description:
+      - Whether to kill the job when it exceeds O(job_timeout).
+      - Requires O(job_timeout).
     type: bool
+    required: false
+    aliases:
+      - kill_on_timeout
+  memory:
+    description:
+      - The RAM allocated to the job, in GB.
+    type: float
+    required: false
+  gpu:
+    description:
+      - The count of Nvidia GPUs allocated to the job.
+    type: int
+    required: false
+    aliases:
+      - nvidia_gpu
+  parent:
+    description:
+      - The unique identifier of a parent job that triggers this job on completion.
+      - Mutually exclusive with O(schedule).
+    type: str
+    required: false
+    aliases:
+      - parent_job_id
+  paused:
+    description:
+      - Whether the job schedule is paused.
+    type: bool
+    required: false
+  addons:
+    description:
+      - A list of runtime addon identifiers for the job.
+      - On update, the provided addons are merged with the job's existing addons.
+    type: list
+    elements: str
+    required: false
+    aliases:
+      - runtime_addons
+      - runtime_addon_identifiers
+  runtime:
+    description:
+      - The container runtime identifier for the job.
+      - Required on creation for projects whose default engine type is C(ml_runtime).
+      - Mutually exclusive with O(kernel).
+    type: str
+    required: false
+    aliases:
+      - runtime_image_id
+      - runtime_identifier
+  schedule:
+    description:
+      - The cron schedule for the job.
+      - Mutually exclusive with O(parent).
+    type: str
+    required: false
+  script:
+    description:
+      - The entrypoint script for the job.
+      - Required when creating a job.
+    type: str
+    required: false
+  job_timeout:
+    description:
+      - The job timeout, in seconds.
+    type: int
+    required: false
+    aliases:
+      - execution_timeout
+  recipients:
+    description:
+      - A list of email notification recipients for job runs.
+      - Applied only on job creation.
+    type: list
+    elements: dict
+    required: false
+    suboptions:
+      email:
+        description:
+          - The email address of the recipient.
+        type: str
+        required: true
+      success:
+        description:
+          - Whether to notify on job success.
+        type: bool
+        required: false
+        default: true
+      failure:
+        description:
+          - Whether to notify on job failure.
+        type: bool
+        required: false
+        default: true
+      timeout:
+        description:
+          - Whether to notify on job timeout.
+        type: bool
+        required: false
+        default: true
+      stopped:
+        description:
+          - Whether to notify when a job is stopped.
+        type: bool
+        required: false
+        default: true
+  state:
+    description:
+      - The declarative state of the job.
+    type: str
+    required: false
+    default: present
+    choices:
+      - present
+      - absent
+extends_documentation_fragment:
+  - cloudera.services.ml_client
+  - cloudera.services.services_client
 """
 
 EXAMPLES = r"""
+- name: Create a job
+  cloudera.services.ml_project_job:
+    url: "https://ml-workspace.example.com"
+    api_key: "{{ cml_api_key }}"
+    project_name: my-project
+    name: nightly-etl
+    script: etl.py
+    runtime: "{{ runtime_id }}"
+    schedule: "0 2 * * *"
+    env:
+      LOG_LEVEL: info
+    state: present
 
+- name: Update a job's timeout
+  cloudera.services.ml_project_job:
+    project_id: "{{ project_id }}"
+    name: nightly-etl
+    job_timeout: 3600
+    kill: true
+
+- name: Delete a job
+  cloudera.services.ml_project_job:
+    project_id: "{{ project_id }}"
+    id: "{{ job_id }}"
+    state: absent
 """
 
 RETURN = r"""
----
+job:
+  description: The CML job details.
+  returned: always
+  type: dict
+  contains:
+    id:
+      description: The unique identifier of the job.
+      type: str
+      returned: always
+    name:
+      description: The name of the job.
+      type: str
+      returned: always
+    project_id:
+      description: The identifier of the enclosing project.
+      type: str
+      returned: when available
+    script:
+      description: The entrypoint script for the job.
+      type: str
+      returned: when available
+    arguments:
+      description: The command-line arguments passed to the job script.
+      type: str
+      returned: when available
+    kernel:
+      description: The kernel for the job.
+      type: str
+      returned: when available
+    cpu:
+      description: The vCPU allocated to the job.
+      type: float
+      returned: when available
+    memory:
+      description: The RAM allocated to the job, in GB.
+      type: float
+      returned: when available
+    nvidia_gpu:
+      description: The count of Nvidia GPUs allocated to the job.
+      type: int
+      returned: when available
+    runtime_identifier:
+      description: The container runtime identifier for the job.
+      type: str
+      returned: when available
+    runtime_addon_identifiers:
+      description: The runtime addon identifiers for the job.
+      type: list
+      elements: str
+      returned: when available
+    schedule:
+      description: The cron schedule for the job.
+      type: str
+      returned: when available
+    parent_job_id:
+      description: The identifier of the parent job that triggers this job.
+      type: str
+      returned: when available
+    timeout:
+      description: The job timeout, in seconds.
+      type: int
+      returned: when available
+    kill_on_timeout:
+      description: Whether the job is killed on timeout.
+      type: bool
+      returned: when available
+    paused:
+      description: Whether the job schedule is paused.
+      type: bool
+      returned: when available
+    environment:
+      description: The environment variables of the job.
+      type: dict
+      returned: when available
+    creator:
+      description: Details of the user that created the job.
+      type: dict
+      returned: when available
+    created_at:
+      description: The timestamp when the job was created.
+      type: str
+      returned: when available
+    updated_at:
+      description: The timestamp when the job was last updated.
+      type: str
+      returned: when available
 sdk_out:
-    description: Returns the captured CDP SDK log.
-    returned: when supported
-    type: str
+  description: Returns the captured REST API log.
+  returned: when supported
+  type: str
 sdk_out_lines:
-    description: Returns a list of each line of the captured CDP SDK log.
-    returned: when supported
-    type: list
-    elements: str
+  description: Returns a list of each line of the captured REST API log.
+  returned: when supported
+  type: list
+  elements: str
 """
 
+from dataclasses import replace
+from typing import Any, Dict, NoReturn, Optional
 
-class MLProjectJob(MLModule):
-    def __init__(self, module):
-        super(MLProjectJob, self).__init__(module)
+from ansible_collections.cloudera.services.plugins.module_utils.common import (
+    diff_dict,
+    to_dict,
+)
+from ansible_collections.cloudera.services.plugins.module_utils.ml import (
+    MlServicesModule,
+    MlJob,
+    MlJobClient,
+    MlProject,
+    MlProjectClient,
+    validate_project_id,
+)
+
+CREATE_REQUIRED = ["script"]
+
+
+class MlProjectJobModule(MlServicesModule):
+    def __init__(self):
+        super().__init__(
+            argument_spec=dict(
+                project_name=dict(type="str", required=False),
+                project_id=dict(type="str", required=False),
+                name=dict(type="str", required=False, aliases=["job"]),
+                id=dict(type="str", required=False, aliases=["job_id"]),
+                arguments=dict(type="str", required=False),
+                attachments=dict(type="list", elements="str", required=False),
+                cpu=dict(type="float", required=False),
+                env=dict(type="dict", required=False, aliases=["env_vars"]),
+                kernel=dict(
+                    type="str",
+                    required=False,
+                    choices=["python3", "python2", "r", "scala"],
+                ),
+                kill=dict(type="bool", required=False, aliases=["kill_on_timeout"]),
+                memory=dict(type="float", required=False),
+                gpu=dict(type="int", required=False, aliases=["nvidia_gpu"]),
+                parent=dict(type="str", required=False, aliases=["parent_job_id"]),
+                paused=dict(type="bool", required=False),
+                addons=dict(
+                    type="list",
+                    elements="str",
+                    required=False,
+                    aliases=["runtime_addons", "runtime_addon_identifiers"],
+                ),
+                runtime=dict(
+                    type="str",
+                    required=False,
+                    aliases=["runtime_image_id", "runtime_identifier"],
+                ),
+                schedule=dict(type="str", required=False),
+                script=dict(type="str", required=False),
+                job_timeout=dict(
+                    type="int",
+                    required=False,
+                    aliases=["execution_timeout"],
+                ),
+                recipients=dict(
+                    type="list",
+                    elements="dict",
+                    required=False,
+                    options=dict(
+                        email=dict(type="str", required=True),
+                        success=dict(type="bool", required=False, default=True),
+                        failure=dict(type="bool", required=False, default=True),
+                        timeout=dict(type="bool", required=False, default=True),
+                        stopped=dict(type="bool", required=False, default=True),
+                    ),
+                ),
+                state=dict(
+                    type="str",
+                    required=False,
+                    choices=["present", "absent"],
+                    default="present",
+                ),
+            ),
+            mutually_exclusive=[
+                ["name", "id"],
+                ["project_name", "project_id"],
+                ["parent", "schedule"],
+                ["kernel", "runtime"],
+            ],
+            required_by={
+                "kill": ["job_timeout"],
+            },
+            required_one_of=[
+                ["name", "id"],
+                ["project_name", "project_id"],
+            ],
+            supports_check_mode=True,
+        )
 
         # Set parameters
-        self.project_name = self._get_param("project_name")
-        self.project_id = self._get_param("project_id")
-        self.name = self._get_param("name")
-        self.id = self._get_param("id")
-        self.arguments = self._get_param("arguments")
-        self.attachments = self._get_param("attachments")
-        self.cpu = self._get_param("cpu")
-        self.creator = self._get_param("creator")
-        self.engine = self._get_param("engine")
-        self.env = self._get_param("env")
-        self.kernel = self._get_param("kernel")
-        self.kill = self._get_param("kill")
-        self.memory = self._get_param("memory")
-        self.gpu = self._get_param("gpu")
-        self.parent = self._get_param("parent")
-        self.addons = self._get_param("addons")
-        self.runtime = self._get_param("runtime")
-        self.schedule = self._get_param("schedule")
-        self.script = self._get_param("script")
-        self.timeout = self._get_param("timeout")
-        self.recipients = self._get_param("recipients")
-        self.state = self._get_param("state")
+        self.project_name = self.get_param("project_name")
+        self.project_id = self.get_param("project_id")
+        self.name = self.get_param("name")
+        self.id = self.get_param("id")
+        self.arguments = self.get_param("arguments")
+        self.attachments = self.get_param("attachments")
+        self.cpu = self.get_param("cpu")
+        self.env = self.get_param("env")
+        self.kernel = self.get_param("kernel")
+        self.kill = self.get_param("kill")
+        self.memory = self.get_param("memory")
+        self.gpu = self.get_param("gpu")
+        self.parent = self.get_param("parent")
+        self.paused = self.get_param("paused")
+        self.addons = self.get_param("addons")
+        self.runtime = self.get_param("runtime")
+        self.schedule = self.get_param("schedule")
+        self.script = self.get_param("script")
+        self.job_timeout = self.get_param("job_timeout")
+        self.recipients = self.get_param("recipients")
+        self.state = self.get_param("state")
 
         # Initialize the return values
         self.changed = False
-        self.job = {}
+        self.diff = {}
+        self.job: Optional[MlJob] = None
 
-        # Execute logic process
-        self.process()
+    def _fail(self, msg: str) -> NoReturn:
+        # AnsibleModule.fail_json raises SystemExit at runtime; the trailing
+        # raise is unreachable but marks this method as NoReturn so the type
+        # checker can narrow values validated ahead of a failure.
+        self.module.fail_json(msg=msg)
+        raise SystemExit(msg)
 
-    @MLModule.process_debug
-    def process(self):
-        project = None
+    def _resolve_project(self) -> MlProject:
+        client = MlProjectClient(self.api_client)
+        project: Optional[MlProject] = None
         if self.project_id:
             if not validate_project_id(self.project_id):
-                self.module.fail_json(msg="Invalid Project ID: " + self.id)
-            project = self.get_project(self.project_id)
+                self._fail("Invalid Project ID: %s" % self.project_id)
+            project = client.describe_project(self.project_id)
         else:
-            project = self.find_project(self.project_name)
-
-        if not project:
-            self.module.fail_json(msg="Project not found")
-
-        existing = None
-        if self.id:
-            existing = self.get_job(project["id"], self.id)
-        else:
-            existing = self.find_job(project["id"], self.name)
-
-        if self.state == "present":
-            payload = dict()
-            # Create and update
-            if self.kernel:
-                if project["default_engine_type"] == "ml_runtime":
-                    self.module.fail_json(
-                        msg="Invalid parameter, 'kernel'. Default project engine type is 'ML Runtime'.",
-                    )
-                payload.update(kernel=self.kernel)
-            if self.runtime:
-                payload.update(runtime_identifier=self.runtime)
-            if self.name:
-                payload.update(name=self.name)
-            if self.id:
-                payload.update(id=self.id)
-            if self.arguments:
-                payload.update(arguments=self.arguments)
-            if self.cpu:
-                payload.update(cpu=self.cpu)
-            # Needed? if self.engine: payload.update(engine=self.engine)
-            if self.kill is not None:
-                payload.update(kill_on_timeout=self.kill)
-            if self.memory:
-                payload.update(memory=self.memory)
-            if self.gpu:
-                payload.update(nvidia_gpu=self.gpu)
-            if self.addons:
-                payload.update(runtime_addon_identifiers=self.addons)
-            if self.schedule:
-                payload.update(schedule=self.schedule)
-            if self.script:
-                payload.update(script=self.script)
-            if self.timeout:
-                payload.update(timeout=self.timeout)  # Might be a str for update
-
-            # Update the job
-            if existing:
-                if self.env:
-                    payload.update(
-                        env=self.env,
-                    )  # As multiple patch calls, one per entry
-                if self.parent:
-                    payload.update(parent_id=self.parent)
-                if self.creator:
-                    payload.update(
-                        foo=self._get_param("creator", "email"),
-                    )  # TODO Unroll suboptions
-
-                # Merge runtime addon identifiers if they exist, giving priority to user-specified addons
-                if self.addons:
-                    if "runtime_addon_identifiers" in existing:
-                        # Merge user addons with existing ones (user addons first)
-                        merged_addons = list(self.addons)
-                        for addon in existing["runtime_addon_identifiers"]:
-                            if addon not in merged_addons:
-                                merged_addons.append(addon)
-                        # Sort to ensure consistent ordering for comparison
-                        payload.update(runtime_addon_identifiers=sorted(merged_addons))
-                    else:
-                        # No existing addons, just use user-specified (sorted)
-                        payload.update(runtime_addon_identifiers=sorted(self.addons))
-
-                diff = difference(payload, existing)
-                if diff and not self.module.check_mode:
-                    self.changed = True
-                    self.job = self.query(
-                        method="PATCH",
-                        api=["projects", project["id"], "jobs", existing["id"]],
-                        body=diff,
-                    )
-                else:
-                    self.job = existing
-            # Create the job
-            else:
-                if self.attachments:
-                    payload.update(attachments=self.attachments)
-                if self.env:
-                    payload.update(env=self.env)  # As a straight dict
-                if self.parent:
-                    payload.update(parent_job_id=self.parent)
-                if not self.runtime and project["default_engine_type"] == "ml_runtime":
-                    self.module.fail_json(
-                        msg="Missing parameter, 'runtime'. Default project engine type is 'ML Runtime'.",
-                    )
-                    payload.update(runtime=self.runtime)
-                if self.recipients:
-                    payload.update(recipients=self.recipients)  # TODO Unroll suboptions
-                if not self.module.check_mode:
-                    self.changed = True
-                    self.job = self.query(
-                        method="POST",
-                        api=["projects", project["id"], "jobs"],
-                        body=payload,
-                    )
-        elif existing and not self.module.check_mode:
-            # Delete the job
-            self.changed = True
-            self.query(
-                method="DELETE",
-                api=["projects", project["id"], "jobs", existing["id"]],
+            project = next(
+                (p for p in client.list_projects() if p.name == self.project_name),
+                None,
             )
+        if not project:
+            self._fail("Project not found")
+        return project
+
+    def _merged_environment(self, existing: MlJob) -> Any:
+        if self.env is None:
+            return existing.environment
+        current = existing.environment
+        if not isinstance(current, dict):
+            current = {}
+        return {**current, **self.env}
+
+    def _merged_addons(self, existing: MlJob) -> Any:
+        if self.addons is None:
+            return existing.runtime_addon_identifiers
+        # User-specified addons take priority; existing addons are appended and
+        # the result is sorted for stable comparison.
+        merged = list(self.addons)
+        current = existing.runtime_addon_identifiers
+        if isinstance(current, list):
+            for addon in current:
+                if addon not in merged:
+                    merged.append(addon)
+        return sorted(merged)
+
+    def _incoming_job(self) -> MlJob:
+        incoming = MlJob(name=self.name)
+        if self.script is not None:
+            incoming.script = self.script
+        if self.arguments is not None:
+            incoming.arguments = self.arguments
+        if self.kernel is not None:
+            incoming.kernel = self.kernel
+        if self.cpu is not None:
+            incoming.cpu = self.cpu
+        if self.memory is not None:
+            incoming.memory = self.memory
+        if self.gpu is not None:
+            incoming.nvidia_gpu = self.gpu
+        if self.runtime is not None:
+            incoming.runtime_identifier = self.runtime
+        if self.addons is not None:
+            incoming.runtime_addon_identifiers = sorted(self.addons)
+        if self.attachments is not None:
+            incoming.attachments = self.attachments
+        if self.schedule is not None:
+            incoming.schedule = self.schedule
+        if self.parent is not None:
+            incoming.parent_job_id = self.parent
+        if self.job_timeout is not None:
+            incoming.timeout = self.job_timeout
+        if self.kill is not None:
+            incoming.kill_on_timeout = self.kill
+        if self.paused is not None:
+            incoming.paused = self.paused
+        if self.recipients is not None:
+            incoming.recipients = self.recipients
+        if self.env is not None:
+            incoming.environment = self.env
+        return incoming
+
+    def process(self) -> None:
+        project = self._resolve_project()
+        project_id = project.id
+        if not isinstance(project_id, str):
+            self._fail("Project ID is invalid from resolved project.")
+        is_ml_runtime = project.default_engine_type == "ml_runtime"
+        client = MlJobClient(self.api_client)
+
+        if self.kernel is not None and is_ml_runtime:
+            self.module.fail_json(
+                msg="Invalid parameter, 'kernel'. Default project engine type is 'ml_runtime'.",
+            )
+
+        existing: Optional[MlJob] = None
+        if self.id:
+            existing = client.describe_job(project_id, self.id)
+        else:
+            existing = next(
+                (j for j in client.list_jobs(project_id) if j.name == self.name),
+                None,
+            )
+
+        if self.state == "absent":
+            if existing:
+                if not isinstance(existing.id, str):
+                    self._fail("Job ID is invalid from existing job.")
+                self.changed = True
+                if self.module._diff:
+                    self.diff = {"before": to_dict(existing), "after": None}
+                if not self.module.check_mode:
+                    client.delete_job(project_id, existing.id)
+            return
+
+        # present implies the job should exist.
+        if not existing:
+            missing = [k for k in CREATE_REQUIRED if self.get_param(k) is None]
+            if missing:
+                self.module.fail_json(
+                    msg="Missing required parameters for creation: %s"
+                    % ", ".join(sorted(missing)),
+                )
+            if self.runtime is None and is_ml_runtime:
+                self.module.fail_json(
+                    msg="Missing parameter, 'runtime'. Default project engine type is 'ml_runtime'.",
+                )
+
+            incoming = self._incoming_job()
+            self.changed = True
+            if self.module._diff:
+                self.diff = {"before": None, "after": to_dict(incoming)}
+            if not self.module.check_mode:
+                self.job = client.create_job(project_id, incoming)
+            else:
+                self.job = incoming
+        else:
+            # Update an existing job
+            desired = replace(
+                existing,
+                script=self.script if self.script is not None else existing.script,
+                arguments=(
+                    self.arguments if self.arguments is not None else existing.arguments
+                ),
+                kernel=self.kernel if self.kernel is not None else existing.kernel,
+                cpu=self.cpu if self.cpu is not None else existing.cpu,
+                memory=self.memory if self.memory is not None else existing.memory,
+                nvidia_gpu=self.gpu if self.gpu is not None else existing.nvidia_gpu,
+                runtime_identifier=(
+                    self.runtime
+                    if self.runtime is not None
+                    else existing.runtime_identifier
+                ),
+                runtime_addon_identifiers=self._merged_addons(existing),
+                schedule=(
+                    self.schedule if self.schedule is not None else existing.schedule
+                ),
+                parent_job_id=(
+                    self.parent if self.parent is not None else existing.parent_job_id
+                ),
+                timeout=(
+                    self.job_timeout
+                    if self.job_timeout is not None
+                    else existing.timeout
+                ),
+                kill_on_timeout=(
+                    self.kill if self.kill is not None else existing.kill_on_timeout
+                ),
+                paused=self.paused if self.paused is not None else existing.paused,
+                environment=self._merged_environment(existing),
+            )
+
+            prev_config, next_config = diff_dict(existing, desired)
+
+            self.job = existing
+            if prev_config or next_config:
+                self.changed = True
+                if self.module._diff:
+                    self.diff = {"before": prev_config, "after": next_config}
+                if not self.module.check_mode:
+                    self.job = client.update_job(project_id, desired)
+                else:
+                    self.job = desired
 
 
 def main():
-    module = MLProjectJob.ansible_module(
-        argument_spec=dict(
-            project_name=dict(required=False, type="str"),
-            project_id=dict(required=False, type="str"),
-            name=dict(required=False, type="str", aliases=["job"]),
-            id=dict(required=False, type="str", aliases=["job_id"]),
-            arguments=dict(required=False, type="str"),
-            attachments=dict(required=False, type="list", elements="str"),
-            cpu=dict(required=False, type="int"),  # vCPU
-            creator=dict(
-                required=False,
-                type="dict",
-                options=dict(
-                    email=dict(required=False, type="str"),
-                    name=dict(required=False, type="str"),
-                    username=dict(required=False, type="str"),
-                ),
-            ),
-            # Not needed? engine=dict(required=False, type='str', aliases=['image', 'engine_image_id']),
-            env=dict(required=False, type="dict", aliases=["env_vars"]),
-            kernel=dict(
-                required=False,
-                type="str",
-                choices=["python3", "python2", "r", "scala"],
-            ),
-            kill=dict(required=False, type="bool", aliases=["kill_on_timeout"]),
-            memory=dict(required=False, type="float"),  # GB
-            gpu=dict(required=False, type="int", aliases=["nvidia_gpu"]),
-            parent=dict(required=False, type="str", aliases=["parent_job_id"]),
-            # paused=dict(required=False, type='bool'),
-            addons=dict(
-                required=False,
-                type="list",
-                elements="str",
-                aliases=["runtime_addon_ids", "runtime_addons"],
-            ),
-            runtime=dict(required=False, type="str", aliases=["runtime_image_id"]),
-            schedule=dict(required=False, type="str"),
-            script=dict(required=False, type="str"),
-            timeout=dict(required=False, type="int"),
-            recipients=dict(
-                required=False,
-                type="list",
-                elements="dict",
-                options=dict(
-                    email=dict(required=True, type="str"),  # Collaborator
-                    success=dict(required=False, type="bool", default=True),
-                    failure=dict(required=False, type="bool", default=True),
-                    timeout=dict(required=False, type="bool", default=True),
-                    stopped=dict(required=False, type="bool", default=True),
-                ),
-            ),
-            state=dict(
-                required=False,
-                type="str",
-                choices=["present", "absent"],
-                default="present",
-            ),
-        ),
-        mutually_exclusive=[
-            ["parent", "schedule"],
-            ["kernel", "runtime"],
-        ],
-        required_by={
-            "kill": ["timeout"],
-        },
-        required_one_of=[
-            ["name", "id"],
-            ["project_name", "project_id"],
-        ],
-        supports_check_mode=True,
-    )
+    result = MlProjectJobModule()
 
-    result = MLProjectJob(module)
-
-    output = dict(
+    output: Dict[str, Any] = dict(
         changed=result.changed,
-        job=result.job,
+        job=to_dict(result.job) if result.job else {},
     )
 
-    if result.debug:
+    if result.debug_log:
         output.update(
             sdk_out=result.log_out,
             sdk_out_lines=result.log_lines,
         )
 
-    module.exit_json(**output)
+    result.module.exit_json(**output)
 
 
 if __name__ == "__main__":

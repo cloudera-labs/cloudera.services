@@ -164,7 +164,11 @@ def test_ml_project_module_delete_nonexistent(ml_module_args):
     assert result["changed"] is False
 
 
-def test_ml_project_module_check_mode_create(request, ml_module_args, ml_project_client):
+def test_ml_project_module_check_mode_create(
+    request,
+    ml_module_args,
+    ml_project_client,
+):
     """Check mode reports change but does not create the project."""
     project_name = request.node.name
 
@@ -179,9 +183,7 @@ def test_ml_project_module_check_mode_create(request, ml_module_args, ml_project
     assert result["changed"] is True
 
     # Nothing should have been persisted
-    assert not any(
-        p.name == project_name for p in ml_project_client.list_projects()
-    )
+    assert not any(p.name == project_name for p in ml_project_client.list_projects())
 
 
 def test_ml_project_module_check_mode_delete(

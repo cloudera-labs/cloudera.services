@@ -312,14 +312,22 @@ class MlProjectModule(MlServicesModule):
                     choices=["ml_runtime", "legacy_engine"],
                     aliases=["default_project_engine_type"],
                 ),
-                env=dict(type="dict", required=False, aliases=["environment_variables"]),
+                env=dict(
+                    type="dict",
+                    required=False,
+                    aliases=["environment_variables"],
+                ),
                 permission=dict(
                     type="str",
                     required=False,
                     aliases=["organization_permission"],
                 ),
                 parent=dict(type="str", required=False, aliases=["parent_project"]),
-                memory=dict(type="int", required=False, aliases=["shared_memory_limit"]),
+                memory=dict(
+                    type="int",
+                    required=False,
+                    aliases=["shared_memory_limit"],
+                ),
                 state=dict(
                     type="str",
                     required=False,
