@@ -82,6 +82,8 @@ from ansible_collections.cloudera.services.plugins.module_utils.ml import (
     MlProjectFileClient,
     MlRuntimeClient,
     MlRuntimeAddonClient,
+    MlRuntimeRepo,
+    MlRuntimeRepoClient,
 )
 from ansible_collections.cloudera.services.tests.unit import (
     AnsibleFailJson,
@@ -1140,6 +1142,33 @@ def ml_model_build_client(ml_rest_client) -> MlModelBuildClient:
 def ml_model_deployment_client(ml_rest_client) -> MlModelDeploymentClient:
     """Fixture to create an MlModelDeploymentClient instance."""
     return MlModelDeploymentClient(api_client=ml_rest_client)
+
+
+@pytest.fixture(scope="module")
+def ml_runtime_repo_client(ml_rest_client) -> MlRuntimeRepoClient:
+    """Fixture to create an MlRuntimeRepoClient instance."""
+    return MlRuntimeRepoClient(api_client=ml_rest_client)
+
+
+@pytest.fixture
+def purge_ml_runtime_repo(
+    ml_runtime_repo_client,
+) -> Generator[Callable[[MlRuntimeRepo], MlRuntimeRepo], None, None]:
+    """Factory fixture to register CML runtime repos for cleanup after the test."""
+    repos: List[MlRuntimeRepo] = []
+
+    def _add_repo(repo: MlRuntimeRepo) -> MlRuntimeRepo:
+        repos.append(repo)
+        return repo
+
+    yield _add_repo
+
+    for repo in repos:
+        try:
+            if isinstance(repo.id, int):
+                ml_runtime_repo_client.delete_runtime_repo(repo.id)
+        except Exception as e:
+            log.info(f"Failed to delete runtime repo {repo.id} during cleanup: {str(e)}")
 
 
 @pytest.fixture(scope="module")
