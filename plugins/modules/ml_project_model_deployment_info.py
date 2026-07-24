@@ -15,195 +15,341 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
+DOCUMENTATION = r"""
+module: ml_project_model_deployment_info
+short_description: Retrieve information about Cloudera Machine Learning (CML) project model deployments
+description:
+  - Retrieve information about one or more Cloudera Machine Learning (CML) project model deployments.
+  - The module can list all deployments for a build or filter by a number of criteria.
+  - The module supports C(check_mode).
+author:
+  - "Webster Mudge (@wmudge)"
+version_added: "1.0.0"
+options:
+  project_name:
+    description:
+      - The name of the enclosing project.
+      - Mutually exclusive with O(project_id).
+    type: str
+    required: false
+  project_id:
+    description:
+      - The unique identifier of the enclosing project.
+      - Mutually exclusive with O(project_name).
+    type: str
+    required: false
+  name:
+    description:
+      - The name of the enclosing model.
+      - Mutually exclusive with O(model_id).
+    type: str
+    required: false
+    aliases:
+      - model_name
+  model_id:
+    description:
+      - The unique identifier of the enclosing model.
+      - Mutually exclusive with O(name).
+    type: str
+    required: false
+  id:
+    description:
+      - The unique identifier of the build whose deployments to retrieve.
+      - If not set, the most recent successful build is used.
+    type: str
+    required: false
+    aliases:
+      - build_id
+  status:
+    description:
+      - Filter the deployments by status.
+    type: str
+    required: false
+    choices:
+      - pending
+      - deployed
+  deployer:
+    description:
+      - Filter the deployments by deployer details.
+    type: dict
+    required: false
+    suboptions:
+      name:
+        description:
+          - The display name of the deployer.
+        type: str
+        required: false
+      username:
+        description:
+          - The username of the deployer.
+        type: str
+        required: false
+      email:
+        description:
+          - The email address of the deployer.
+        type: str
+        required: false
+extends_documentation_fragment:
+  - cloudera.services.ml_client
+  - cloudera.services.services_client
+"""
 
-from ansible.module_utils.basic import AnsibleModule
+EXAMPLES = r"""
+- name: List all deployments for the latest build of a model
+  cloudera.services.ml_project_model_deployment_info:
+    url: "https://ml-workspace.example.com"
+    api_key: "{{ cml_api_key }}"
+    project_name: my-project
+    name: fraud-detector
+  register: all_deployments
+
+- name: List deployed deployments
+  cloudera.services.ml_project_model_deployment_info:
+    project_id: "{{ project_id }}"
+    model_id: "{{ model_id }}"
+    status: deployed
+
+- name: List deployments by a deployer
+  cloudera.services.ml_project_model_deployment_info:
+    project_name: my-project
+    name: fraud-detector
+    deployer:
+      username: jdoe
+"""
+
+RETURN = r"""
+model_deployments:
+  description: List of CML model deployments.
+  returned: always
+  type: list
+  elements: dict
+  contains:
+    id:
+      description: The unique identifier of the deployment.
+      type: str
+      returned: always
+    build_id:
+      description: The identifier of the enclosing build.
+      type: str
+      returned: when available
+    model_id:
+      description: The identifier of the enclosing model.
+      type: str
+      returned: when available
+    project_id:
+      description: The identifier of the enclosing project.
+      type: str
+      returned: when available
+    status:
+      description: The status of the deployment.
+      type: str
+      returned: when available
+    cpu:
+      description: The vCPU allocated to the deployment.
+      type: float
+      returned: when available
+    memory:
+      description: The RAM allocated to the deployment, in GB.
+      type: float
+      returned: when available
+    nvidia_gpus:
+      description: The count of Nvidia GPUs allocated to the deployment.
+      type: int
+      returned: when available
+    replicas:
+      description: The replica count of the deployment.
+      type: int
+      returned: when available
+    environment:
+      description: The environment variables of the deployment.
+      type: dict
+      returned: when available
+    deployer:
+      description: Details of the user that deployed the model.
+      type: dict
+      returned: when available
+    created_at:
+      description: The timestamp when the deployment was created.
+      type: str
+      returned: when available
+    updated_at:
+      description: The timestamp when the deployment was last updated.
+      type: str
+      returned: when available
+sdk_out:
+  description: Returns the captured REST API log.
+  returned: when supported
+  type: str
+sdk_out_lines:
+  description: Returns a list of each line of the captured REST API log.
+  returned: when supported
+  type: list
+  elements: str
+"""
+
+from typing import Any, Dict, List, Optional
+
+from ansible_collections.cloudera.services.plugins.module_utils.common import (
+    to_dict,
+)
 from ansible_collections.cloudera.services.plugins.module_utils.ml import (
-    MLModule,
+    MlServicesModule,
+    MlModel,
+    MlModelClient,
+    MlModelBuild,
+    MlModelBuildClient,
+    MlModelDeployment,
+    MlModelDeploymentClient,
+    MlProject,
+    MlProjectClient,
     validate_project_id,
 )
 
 
-ANSIBLE_METADATA = {
-    "metadata_version": "1.1",
-    "status": ["preview"],
-    "supported_by": "community",
-}
-
-DOCUMENTATION = r"""
----
-module: ml_project_model_deployment_info
-short_description: Get information for Cloudera Machine Learning (CML) project model deployments
-description:
-  - Get information for one or more Cloudera Machine Learning (CML) project model deployments
-  - The module supports check_mode.
-  - The module supports the C(v2) API only.
-author:
-  - "Webster Mudge (@wmudge)"
-version_added: "1.0.0"
-requirements:
-  - requests
-options:
-  debug:
-    description:
-      - Flag to capture and return the debugging log of the underlying CDP SDK.
-      - If set, the log level will be set from ERROR to DEBUG.
-    aliases:
-      - debug_cdpsdk
-    default: False
-    type: bool
-extends_documentation_fragment:
-  - cloudera.services.ml_endpoint
-"""
-
-EXAMPLES = r"""
-
-"""
-
-RETURN = r"""
----
-sdk_out:
-    description: Returns the captured CDP SDK log.
-    returned: when supported
-    type: str
-sdk_out_lines:
-    description: Returns a list of each line of the captured CDP SDK log.
-    returned: when supported
-    type: list
-    elements: str
-"""
-
-
-class MLProjectModelDeploymentInfo(MLModule):
-    def __init__(self, module):
-        super(MLProjectModelDeploymentInfo, self).__init__(module)
+class MlProjectModelDeploymentInfoModule(MlServicesModule):
+    def __init__(self):
+        super().__init__(
+            argument_spec=dict(
+                project_name=dict(type="str", required=False),
+                project_id=dict(type="str", required=False),
+                name=dict(type="str", required=False, aliases=["model_name"]),
+                model_id=dict(type="str", required=False),
+                id=dict(type="str", required=False, aliases=["build_id"]),
+                status=dict(
+                    type="str",
+                    required=False,
+                    choices=["pending", "deployed"],
+                ),
+                deployer=dict(
+                    type="dict",
+                    required=False,
+                    options=dict(
+                        name=dict(type="str", required=False),
+                        username=dict(type="str", required=False),
+                        email=dict(type="str", required=False),
+                    ),
+                ),
+            ),
+            mutually_exclusive=[
+                ["project_name", "project_id"],
+                ["name", "model_id"],
+            ],
+            required_one_of=[
+                ["project_name", "project_id"],
+                ["name", "model_id"],
+            ],
+            supports_check_mode=True,
+        )
 
         # Set parameters
-        self.project_name = self._get_param("project_name")
-        self.project_id = self._get_param("project_id")
-        self.name = self._get_param("name")
-        self.model_id = self._get_param("model_id")
-        self.id = self._get_param("id")
-        self.deployer_email = self._get_param("deployer", "email")
-        self.deployer_name = self._get_param("deployer", "name")
-        self.deployer_username = self._get_param("deployer", "username")
-        self.status = self._get_param("status")
+        self.project_name = self.get_param("project_name")
+        self.project_id = self.get_param("project_id")
+        self.name = self.get_param("name")
+        self.model_id = self.get_param("model_id")
+        self.id = self.get_param("id")
+        self.status = self.get_param("status")
+        self.deployer = self.get_param("deployer")
 
-        # Initialize the return values
-        self.deployments = []
+        # Initialize result variables
+        self.deployment_list: List[MlModelDeployment] = []
 
-        # Execute logic process
-        self.process()
-
-    @MLModule.process_debug
-    def process(self):
-        project = None
+    def _resolve_project_id(self) -> str:
+        client = MlProjectClient(self.api_client)
+        project: Optional[MlProject] = None
         if self.project_id:
             if not validate_project_id(self.project_id):
-                self.module.fail_json(msg="Invalid Project ID: " + self.project_id)
-            project = self.get_project(self.project_id)
+                self.module.fail_json(msg="Invalid Project ID: %s" % self.project_id)
+            project = client.describe_project(self.project_id)
         else:
-            project = self.find_project(self.project_name)
-
+            project = next(
+                (p for p in client.list_projects() if p.name == self.project_name),
+                None,
+            )
         if not project:
             self.module.fail_json(msg="Project not found")
+        if not isinstance(project.id, str):
+            self.module.fail_json(msg="Project ID is invalid from resolved project.")
+        return project.id
 
-        model = None
+    def _resolve_model_id(self, project_id: str) -> str:
+        client = MlModelClient(self.api_client)
+        model: Optional[MlModel] = None
         if self.model_id:
-            model = self.get_model(project["id"], self.model_id)
+            model = client.describe_model(project_id, self.model_id)
         else:
-            model = self.find_model(project["id"], self.name)
-
+            model = next(
+                (m for m in client.list_models(project_id) if m.name == self.name),
+                None,
+            )
         if not model:
             self.module.fail_json(msg="Model not found")
+        if not isinstance(model.id, str):
+            self.module.fail_json(msg="Model ID is invalid from resolved model.")
+        return model.id
 
-        build = None
+    def _resolve_build_id(self, project_id: str, model_id: str) -> str:
+        client = MlModelBuildClient(self.api_client)
+        build: Optional[MlModelBuild] = None
         if self.id:
-            build = self.get_build(project["id"], model["id"], self.id)
+            build = client.describe_build(project_id, model_id, self.id)
         else:
-            build = self.find_latest_build(project["id"], model["id"])
-
+            build = client.find_latest_build(project_id, model_id)
         if not build:
             self.module.fail_json(
                 msg="Unable to find deployment(s); model has not been built",
             )
+        if not isinstance(build.id, str):
+            self.module.fail_json(msg="Build ID is invalid from resolved build.")
+        return build.id
 
-        search_filter = dict()
-        if self.deployer_email:
-            search_filter["deployer.email"] = self.deployer_email
-        if self.deployer_name:
-            search_filter["deployer.name"] = self.deployer_name
-        if self.deployer_username:
-            search_filter["deployer.username"] = self.deployer_username
-        if self.status:
-            search_filter["status"] = self.status
+    def _matches(self, deployment: MlModelDeployment) -> bool:
+        if self.status is not None and deployment.status != self.status:
+            return False
 
-        query_params = dict(sort="-created_at")
-        if search_filter:
-            query_params.update(
-                search_filter=json.dumps(search_filter, separators=(",", ":")),
-            )
+        if self.deployer:
+            deployer = deployment.deployer
+            if not isinstance(deployer, dict):
+                return False
+            for key, wanted in self.deployer.items():
+                if wanted is not None and deployer.get(key) != wanted:
+                    return False
 
-        self.deployments = self.query(
-            method="GET",
-            api=[
-                "projects",
-                project["id"],
-                "models",
-                model["id"],
-                "builds",
-                build["id"],
-                "deployments",
-            ],
-            field="model_deployments",
-            params=query_params,
+        return True
+
+    def process(self) -> None:
+        project_id = self._resolve_project_id()
+        model_id = self._resolve_model_id(project_id)
+        build_id = self._resolve_build_id(project_id, model_id)
+        client = MlModelDeploymentClient(self.api_client)
+
+        deployments = [
+            d
+            for d in client.list_deployments(project_id, model_id, build_id)
+            if self._matches(d)
+        ]
+        # Return the most recently created deployments first.
+        self.deployment_list = sorted(
+            deployments,
+            key=lambda d: d.created_at if isinstance(d.created_at, str) else "",
+            reverse=True,
         )
 
 
 def main():
-    module = MLProjectModelDeploymentInfo.ansible_module(
-        argument_spec=dict(
-            project_name=dict(required=False, type="str"),
-            project_id=dict(required=False, type="str"),
-            name=dict(required=False, type="str", aliases=["model_name"]),
-            model_id=dict(required=False, type="str"),
-            id=dict(required=False, type="str", aliases=["build_id"]),
-            deployer=dict(
-                required=False,
-                type="dict",
-                options=dict(
-                    email=dict(required=False, type="str"),
-                    name=dict(required=False, type="str"),
-                    username=dict(required=False, type="str"),
-                ),
-            ),
-            status=dict(
-                required=False,
-                type="str",
-                choices=["pending", "deployed"],
-            ),
-        ),
-        required_one_of=[
-            ["project_name", "project_id"],
-            ["name", "model_id"],
-        ],
-        supports_check_mode=True,
+    result = MlProjectModelDeploymentInfoModule()
+
+    output: Dict[str, Any] = dict(
+        changed=False,
+        model_deployments=[to_dict(d) for d in result.deployment_list],
     )
 
-    result = MLProjectModelDeploymentInfo(module)
-
-    output = dict(
-        changed=result.changed,
-        model_deployments=result.deployments,
-    )
-
-    if result.debug:
+    if result.debug_log:
         output.update(
             sdk_out=result.log_out,
             sdk_out_lines=result.log_lines,
         )
 
-    module.exit_json(**output)
+    result.module.exit_json(**output)
 
 
 if __name__ == "__main__":
