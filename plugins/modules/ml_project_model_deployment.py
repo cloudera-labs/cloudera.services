@@ -15,254 +15,456 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
-
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.cloudera.services.plugins.module_utils.ml import (
-    MLModule,
-    difference,
-    validate_project_id,
-)
-
-ANSIBLE_METADATA = {
-    "metadata_version": "1.1",
-    "status": ["preview"],
-    "supported_by": "community",
-}
-
 DOCUMENTATION = r"""
----
 module: ml_project_model_deployment
-short_description: Create, update, and delete a Cloudera Machine Learning (CML) project model deployment.
+short_description: Manage a Cloudera Machine Learning (CML) project model deployment
 description:
-  - Create, update, and delete a Cloudera Machine Learning (CML) project model deployment.
-  - The module supports check_mode.
-  - The module supports the C(v2) API only.
+  - Start, stop, restart, or delete a Cloudera Machine Learning (CML) project model deployment.
+  - Deployments are immutable; a running deployment is never updated in place. Use
+    O(state=restarted) to stop the current deployment and start a new one on the build.
+  - The module supports C(check_mode).
 author:
   - "Webster Mudge (@wmudge)"
 version_added: "1.0.0"
-requirements:
-  - requests
 options:
-  debug:
+  project_name:
     description:
-      - Flag to capture and return the debugging log of the underlying CDP SDK.
-      - If set, the log level will be set from ERROR to DEBUG.
+      - The name of the enclosing project.
+      - Mutually exclusive with O(project_id).
+    type: str
+    required: false
+  project_id:
+    description:
+      - The unique identifier of the enclosing project.
+      - Mutually exclusive with O(project_name).
+    type: str
+    required: false
+  model_name:
+    description:
+      - The name of the enclosing model.
+      - Mutually exclusive with O(model_id).
+    type: str
+    required: false
+  model_id:
+    description:
+      - The unique identifier of the enclosing model.
+      - Mutually exclusive with O(model_name).
+    type: str
+    required: false
+  build_id:
+    description:
+      - The unique identifier of the build to deploy.
+      - If not set, the most recent successful build is used.
+    type: str
+    required: false
+  id:
+    description:
+      - The unique identifier of an existing deployment.
+    type: str
+    required: false
     aliases:
-      - debug_cdpsdk
-    default: False
-    type: bool
+      - deployment_id
+  cpu:
+    description:
+      - The vCPU allocated to the deployment.
+    type: int
+    required: false
+  memory:
+    description:
+      - The RAM allocated to the deployment, in GB.
+    type: int
+    required: false
+  gpu:
+    description:
+      - The count of Nvidia GPUs allocated to the deployment.
+    type: int
+    required: false
+    aliases:
+      - nvidia_gpus
+  env:
+    description:
+      - Environment variables to set on the deployment.
+    type: dict
+    required: false
+    aliases:
+      - env_vars
+  state:
+    description:
+      - The declarative state of the deployment.
+      - V(present) is an alias for V(started).
+    type: str
+    required: false
+    default: started
+    choices:
+      - started
+      - present
+      - stopped
+      - restarted
+      - absent
+extends_documentation_fragment:
+  - cloudera.services.ml_client
+  - cloudera.services.services_client
 """
 
 EXAMPLES = r"""
+- name: Deploy the latest build of a model
+  cloudera.services.ml_project_model_deployment:
+    url: "https://ml-workspace.example.com"
+    api_key: "{{ cml_api_key }}"
+    project_name: my-project
+    model_name: fraud-detector
+    cpu: 1
+    memory: 2
+    state: started
 
+- name: Stop a deployment
+  cloudera.services.ml_project_model_deployment:
+    project_id: "{{ project_id }}"
+    model_id: "{{ model_id }}"
+    id: "{{ deployment_id }}"
+    state: stopped
+
+- name: Restart (stop then redeploy) a model
+  cloudera.services.ml_project_model_deployment:
+    project_id: "{{ project_id }}"
+    model_id: "{{ model_id }}"
+    state: restarted
+
+- name: Delete a deployment
+  cloudera.services.ml_project_model_deployment:
+    project_id: "{{ project_id }}"
+    model_id: "{{ model_id }}"
+    id: "{{ deployment_id }}"
+    state: absent
 """
 
 RETURN = r"""
----
+deployment:
+  description: The CML model deployment details.
+  returned: always
+  type: dict
+  contains:
+    id:
+      description: The unique identifier of the deployment.
+      type: str
+      returned: always
+    build_id:
+      description: The identifier of the enclosing build.
+      type: str
+      returned: when available
+    model_id:
+      description: The identifier of the enclosing model.
+      type: str
+      returned: when available
+    project_id:
+      description: The identifier of the enclosing project.
+      type: str
+      returned: when available
+    status:
+      description: The status of the deployment.
+      type: str
+      returned: when available
+    cpu:
+      description: The vCPU allocated to the deployment.
+      type: float
+      returned: when available
+    memory:
+      description: The RAM allocated to the deployment, in GB.
+      type: float
+      returned: when available
+    nvidia_gpus:
+      description: The count of Nvidia GPUs allocated to the deployment.
+      type: int
+      returned: when available
+    replicas:
+      description: The replica count of the deployment.
+      type: int
+      returned: when available
+    environment:
+      description: The environment variables of the deployment.
+      type: dict
+      returned: when available
+    deployer:
+      description: Details of the user that deployed the model.
+      type: dict
+      returned: when available
+    created_at:
+      description: The timestamp when the deployment was created.
+      type: str
+      returned: when available
+    updated_at:
+      description: The timestamp when the deployment was last updated.
+      type: str
+      returned: when available
 sdk_out:
-    description: Returns the captured CDP SDK log.
-    returned: when supported
-    type: str
+  description: Returns the captured REST API log.
+  returned: when supported
+  type: str
 sdk_out_lines:
-    description: Returns a list of each line of the captured CDP SDK log.
-    returned: when supported
-    type: list
-    elements: str
+  description: Returns a list of each line of the captured REST API log.
+  returned: when supported
+  type: list
+  elements: str
 """
 
+from typing import Any, Dict, NoReturn, Optional
 
-class MLProjectModelDeployment(MLModule):
-    def __init__(self, module):
-        super(MLProjectModelDeployment, self).__init__(module)
+from ansible_collections.cloudera.services.plugins.module_utils.common import (
+    to_dict,
+)
+from ansible_collections.cloudera.services.plugins.module_utils.ml import (
+    MlServicesModule,
+    MlModel,
+    MlModelClient,
+    MlModelBuild,
+    MlModelBuildClient,
+    MlModelDeployment,
+    MlModelDeploymentClient,
+    MlProject,
+    MlProjectClient,
+    validate_project_id,
+)
+
+
+class MlProjectModelDeploymentModule(MlServicesModule):
+    def __init__(self):
+        super().__init__(
+            argument_spec=dict(
+                project_name=dict(type="str", required=False),
+                project_id=dict(type="str", required=False),
+                model_name=dict(type="str", required=False),
+                model_id=dict(type="str", required=False),
+                build_id=dict(type="str", required=False),
+                id=dict(type="str", required=False, aliases=["deployment_id"]),
+                cpu=dict(type="int", required=False),
+                memory=dict(type="int", required=False),
+                gpu=dict(type="int", required=False, aliases=["nvidia_gpus"]),
+                env=dict(type="dict", required=False, aliases=["env_vars"]),
+                state=dict(
+                    type="str",
+                    required=False,
+                    choices=["started", "present", "stopped", "restarted", "absent"],
+                    default="started",
+                ),
+            ),
+            mutually_exclusive=[
+                ["project_name", "project_id"],
+                ["model_name", "model_id"],
+            ],
+            required_one_of=[
+                ["project_name", "project_id"],
+                ["model_name", "model_id"],
+            ],
+            supports_check_mode=True,
+        )
 
         # Set parameters
-        self.project_name = self._get_param("project_name")
-        self.project_id = self._get_param("project_id")
-        self.model_name = self._get_param("model_name")
-        self.model_id = self._get_param("model_id")
-        self.build_id = self._get_param("build_id")
-        self.id = self._get_param("id")
-        self.cpu = self._get_param("cpu")
-        self.env = self._get_param("env")
-        self.memory = self._get_param("memory")
-        self.gpu = self._get_param("gpu")
-        self.state = self._get_param("state")
+        self.project_name = self.get_param("project_name")
+        self.project_id = self.get_param("project_id")
+        self.model_name = self.get_param("model_name")
+        self.model_id = self.get_param("model_id")
+        self.build_id = self.get_param("build_id")
+        self.id = self.get_param("id")
+        self.cpu = self.get_param("cpu")
+        self.memory = self.get_param("memory")
+        self.gpu = self.get_param("gpu")
+        self.env = self.get_param("env")
+        self.state = self.get_param("state")
+        if self.state == "present":
+            self.state = "started"
 
         # Initialize the return values
         self.changed = False
-        self.deployment = {}
+        self.diff = {}
+        self.deployment: Optional[MlModelDeployment] = None
 
-        # Execute logic process
-        self.process()
+    def _fail(self, msg: str) -> NoReturn:
+        # AnsibleModule.fail_json raises SystemExit at runtime; the trailing
+        # raise is unreachable but marks this method as NoReturn so the type
+        # checker can narrow values validated ahead of a failure.
+        self.module.fail_json(msg=msg)
+        raise SystemExit(msg)
 
-    @MLModule.process_debug
-    def process(self):
-        project = None
+    def _resolve_project_id(self) -> str:
+        client = MlProjectClient(self.api_client)
+        project: Optional[MlProject] = None
         if self.project_id:
             if not validate_project_id(self.project_id):
-                self.module.fail_json(msg="Invalid Project ID: " + self.id)
-            project = self.get_project(self.project_id)
+                self._fail("Invalid Project ID: %s" % self.project_id)
+            project = client.describe_project(self.project_id)
         else:
-            project = self.find_project(self.project_name)
-
+            project = next(
+                (p for p in client.list_projects() if p.name == self.project_name),
+                None,
+            )
         if not project:
-            self.module.fail_json(msg="Project not found")
+            self._fail("Project not found")
+        if not isinstance(project.id, str):
+            self._fail("Project ID is invalid from resolved project.")
+        return project.id
 
-        model = None
+    def _resolve_model_id(self, project_id: str) -> str:
+        client = MlModelClient(self.api_client)
+        model: Optional[MlModel] = None
         if self.model_id:
-            model = self.get_model(project["id"], self.model_id)
+            model = client.describe_model(project_id, self.model_id)
         else:
-            model = self.find_model(project["id"], self.model_name)
-
+            model = next(
+                (m for m in client.list_models(project_id) if m.name == self.model_name),
+                None,
+            )
         if not model:
-            self.module.fail_json(msg="Model not found")
+            self._fail("Model not found")
+        if not isinstance(model.id, str):
+            self._fail("Model ID is invalid from resolved model.")
+        return model.id
 
-        build = None
+    def _resolve_build_id(self, project_id: str, model_id: str) -> str:
+        client = MlModelBuildClient(self.api_client)
+        build: Optional[MlModelBuild] = None
         if self.build_id:
-            build = self.get_build(project["id"], model["id"], self.build_id)
+            build = client.describe_build(project_id, model_id, self.build_id)
         else:
-            build = self.find_latest_build(project["id"], model["id"])
-
+            build = client.find_latest_build(project_id, model_id)
         if not build:
-            self.module.fail_json(msg="Model build not found")
+            self._fail("Model build not found")
+        if not isinstance(build.id, str):
+            self._fail("Build ID is invalid from resolved build.")
+        return build.id
 
-        existing = None
+    def _find_existing(
+        self,
+        client: MlModelDeploymentClient,
+        project_id: str,
+        model_id: str,
+        build_id: str,
+    ) -> Optional[MlModelDeployment]:
         if self.id:
-            existing = self.query(
-                method="GET",
-                api=[
-                    "projects",
-                    project["id"],
-                    "models",
-                    model["id"],
-                    "builds",
-                    build["id"],
-                    "deployments",
-                    self.id,
-                ],
-            )
-        else:
-            deployment_list = self.query(
-                method="GET",
-                api=[
-                    "projects",
-                    project["id"],
-                    "models",
-                    model["id"],
-                    "builds",
-                    build["id"],
-                    "deployments",
-                ],
-                params=dict(
-                    sorted="-created_at",
-                    search_filter=json.dumps(
-                        dict(status="deployed"),
-                        separators=(",", ":"),
-                    ),
-                ),
-                field="model_deployments",
-            )
-            if deployment_list:
-                existing = deployment_list[0]
+            return client.describe_deployment(project_id, model_id, build_id, self.id)
+        deployed = [
+            d
+            for d in client.list_deployments(project_id, model_id, build_id)
+            if d.status == "deployed"
+        ]
+        deployed.sort(
+            key=lambda d: d.created_at if isinstance(d.created_at, str) else "",
+            reverse=True,
+        )
+        return deployed[0] if deployed else None
+
+    def _incoming_deployment(
+        self,
+        build_id: str,
+        base: Optional[MlModelDeployment] = None,
+    ) -> MlModelDeployment:
+        incoming = MlModelDeployment(build_id=build_id)
+        if self.cpu is not None:
+            incoming.cpu = self.cpu
+        elif base is not None and isinstance(base.cpu, (int, float)):
+            incoming.cpu = base.cpu
+        if self.memory is not None:
+            incoming.memory = self.memory
+        elif base is not None and isinstance(base.memory, (int, float)):
+            incoming.memory = base.memory
+        if self.gpu is not None:
+            incoming.nvidia_gpus = self.gpu
+        elif base is not None and isinstance(base.nvidia_gpus, int):
+            incoming.nvidia_gpus = base.nvidia_gpus
+        if self.env is not None:
+            incoming.environment = self.env
+        elif base is not None and isinstance(base.environment, dict):
+            incoming.environment = base.environment
+        return incoming
+
+    def process(self) -> None:
+        project_id = self._resolve_project_id()
+        model_id = self._resolve_model_id(project_id)
+        build_id = self._resolve_build_id(project_id, model_id)
+        client = MlModelDeploymentClient(self.api_client)
+
+        existing = self._find_existing(client, project_id, model_id, build_id)
 
         if self.state == "started":
-            payload = dict()
-            if self.cpu:
-                payload.update(cpu=self.cpu)
-            if self.memory:
-                payload.update(memory=self.memory)
-            if self.gpu:
-                payload.update(nvidia_gpus=self.gpu)
-
             if existing:
-                if self.env:
-                    payload.update(
-                        environment=json.dumps(self.env, separators=(",", ":")),
-                    )
-                diff = difference(payload, existing)
-                if diff:
-                    self.module.warn(
-                        "Deployment exists and deployment reconciliation is not supported. "
-                        + "To change, explicitly rebuild the model and redeploy.",
-                    )
+                # Deployments are immutable; return the running deployment.
                 self.deployment = existing
-            else:
-                if self.env:
-                    payload.update(environment=self.env)
+                return
+            self._create(client, project_id, model_id, build_id)
+            return
+
+        if self.state == "stopped":
+            self.deployment = existing
+            if existing:
+                if not isinstance(existing.id, str):
+                    self._fail("Deployment ID is invalid from existing deployment.")
+                self.changed = True
+                if self.module._diff:
+                    self.diff = {"before": to_dict(existing), "after": None}
                 if not self.module.check_mode:
-                    self.changed = True
-                    self.deployment = self.query(
-                        method="POST",
-                        api=[
-                            "projects",
-                            project["id"],
-                            "models",
-                            model["id"],
-                            "builds",
-                            build["id"],
-                            "deployments",
-                        ],
-                        body=payload,
+                    self.deployment = client.stop_deployment(
+                        project_id, model_id, build_id, existing.id,
                     )
-        elif existing and not self.module.check_mode:
+            return
+
+        if self.state == "absent":
+            self.deployment = existing
+            if existing:
+                if not isinstance(existing.id, str):
+                    self._fail("Deployment ID is invalid from existing deployment.")
+                self.changed = True
+                if self.module._diff:
+                    self.diff = {"before": to_dict(existing), "after": None}
+                if not self.module.check_mode:
+                    client.delete_deployment(
+                        project_id, model_id, build_id, existing.id,
+                    )
+                    self.deployment = None
+            return
+
+        # restarted: stop the running deployment (if any) then start a new one.
+        if existing:
+            if not isinstance(existing.id, str):
+                self._fail("Deployment ID is invalid from existing deployment.")
             self.changed = True
-            self.deployment = self.query(
-                method="POST",
-                api=[
-                    "projects",
-                    project["id"],
-                    "models",
-                    model["id"],
-                    "builds",
-                    build["id"],
-                    "deployments",
-                    existing["id"] + ":stop",
-                ],
+            if not self.module.check_mode:
+                client.stop_deployment(project_id, model_id, build_id, existing.id)
+        self._create(client, project_id, model_id, build_id, base=existing)
+
+    def _create(
+        self,
+        client: MlModelDeploymentClient,
+        project_id: str,
+        model_id: str,
+        build_id: str,
+        base: Optional[MlModelDeployment] = None,
+    ) -> None:
+        incoming = self._incoming_deployment(build_id, base=base)
+        self.changed = True
+        if self.module._diff:
+            self.diff = {"before": None, "after": to_dict(incoming)}
+        if not self.module.check_mode:
+            self.deployment = client.create_deployment(
+                project_id, model_id, build_id, incoming,
             )
+        else:
+            self.deployment = incoming
 
 
 def main():
-    module = MLProjectModelDeployment.ansible_module(
-        argument_spec=dict(
-            project_name=dict(required=False, type="str"),
-            project_id=dict(required=False, type="str"),
-            model_name=dict(required=False, type="str"),
-            model_id=dict(required=False, type="str"),
-            build_id=dict(required=False, type="str"),
-            id=dict(required=False, type="str", aliases=["deployment_id"]),
-            cpu=dict(required=False, type="int"),
-            env=dict(required=False, type="dict", aliases=["env_vars"]),
-            memory=dict(required=False, type="int"),
-            gpu=dict(required=False, type="int", aliases=["nvidia_gpus"]),
-            state=dict(
-                required=False,
-                type="str",
-                choices=["started", "stopped"],
-                default="started",
-            ),
-        ),
-        required_one_of=[
-            ["project_name", "project_id"],
-            ["model_name", "model_id"],
-        ],
-        supports_check_mode=True,
-    )
+    result = MlProjectModelDeploymentModule()
 
-    result = MLProjectModelDeployment(module)
-
-    output = dict(
+    output: Dict[str, Any] = dict(
         changed=result.changed,
-        deployment=result.deployment,
+        deployment=to_dict(result.deployment) if result.deployment else {},
     )
 
-    if result.debug:
+    if result.debug_log:
         output.update(
             sdk_out=result.log_out,
             sdk_out_lines=result.log_lines,
         )
 
-    module.exit_json(**output)
+    result.module.exit_json(**output)
 
 
 if __name__ == "__main__":
