@@ -30,7 +30,7 @@ from kafka import KafkaAdminClient, KafkaProducer
 from kafka.admin import NewTopic
 from kafka.errors import TopicAlreadyExistsError, UnknownTopicOrPartitionError
 from pytest_mock import MockerFixture
-from typing import Any, Callable, Dict, Generator, List
+from typing import Any, Callable, Dict, Generator, List, Optional
 from unittest.mock import Mock
 
 from ansible.module_utils import basic
@@ -74,6 +74,7 @@ from ansible_collections.cloudera.services.plugins.module_utils.ml import (
     MlModelClient,
     MlModelBuild,
     MlModelBuildClient,
+    MlModelDeployment,
     MlModelDeploymentClient,
     MlApplication,
     MlApplicationClient,
@@ -1262,6 +1263,33 @@ def ml_runtime_identifier(ml_runtime_client) -> str:
     pytest.skip("No CML runtime image identifier available")
 
 
+@pytest.fixture(scope="module")
+def ml_model_runtime_identifier(ml_runtime_client) -> str:
+    """Discover a model-serving-capable CML runtime image identifier.
+
+    Model builds require a PBJ Workbench Python runtime; JupyterLab/notebook
+    runtimes are not deployable as models and cause the build to fail.
+    """
+    runtimes = ml_runtime_client.list_runtimes()
+
+    def _pick(predicate) -> Optional[str]:
+        for r in runtimes:
+            if isinstance(r.image_identifier, str) and predicate(r):
+                return r.image_identifier
+        return None
+
+    identifier = _pick(
+        lambda r: r.editor == "PBJ Workbench"
+        and r.edition == "Standard"
+        and "Python" in str(r.kernel or ""),
+    ) or _pick(
+        lambda r: r.editor == "PBJ Workbench" and "Python" in str(r.kernel or ""),
+    )
+    if identifier is None:
+        pytest.skip("No PBJ Workbench Python runtime available for model builds")
+    return identifier
+
+
 @pytest.fixture
 def purge_ml_application(
     ml_application_client,
@@ -1690,3 +1718,134 @@ def ml_project_script(
         ml_project_file_client.delete_file(existing_ml_project.id, path)
     except Exception as e:
         log.info(f"Failed to delete script {path} during cleanup: {str(e)}")
+
+
+@pytest.fixture(scope="module")
+def ml_model_script(
+    existing_ml_project,
+    ml_project_file_client,
+) -> Generator[str, None, None]:
+    """Fixture seeding a servable model script (with a ``predict`` function).
+
+    A model build compiles this file into a servable artifact, so the entrypoint
+    function must exist for the build to succeed and be deployable.
+    """
+    path = "model.py"
+    ml_project_file_client.upload_file(
+        existing_ml_project.id,
+        path,
+        content=(
+            "# created by pytest\n"
+            "def predict(args):\n"
+            "    return {'result': args}\n"
+        ),
+    )
+
+    yield path
+
+    try:
+        ml_project_file_client.delete_file(existing_ml_project.id, path)
+    except Exception as e:
+        log.info(f"Failed to delete script {path} during cleanup: {str(e)}")
+
+
+# Terminal CML model build statuses.
+_ML_BUILD_SUCCESS = {"built", "succeeded"}
+_ML_BUILD_FAILURE = {"build failed", "timedout", "unknown"}
+
+
+@pytest.fixture(scope="module")
+def built_ml_model_build(
+    existing_ml_project,
+    existing_ml_model,
+    ml_model_build_client,
+    ml_model_runtime_identifier,
+    ml_model_script,
+) -> Generator[MlModelBuild, None, None]:
+    """Create a model build and block until it finishes building.
+
+    Model builds compile and push a container image asynchronously (the
+    C(pushing) phase alone can take several minutes), so tests that need a
+    deployable build must wait for a terminal status. Tune the poll ceiling with
+    the C(CML_BUILD_TIMEOUT) env var (seconds; default 1200). Marked implicitly
+    slow via the consuming test.
+    """
+    build = ml_model_build_client.create_build(
+        existing_ml_project.id,
+        existing_ml_model.id,
+        MlModelBuild(
+            file_path=ml_model_script,
+            function_name="predict",
+            runtime_identifier=ml_model_runtime_identifier,
+            comment="built-build",
+        ),
+    )
+
+    timeout = int(os.getenv("CML_BUILD_TIMEOUT", "1200"))
+    interval = int(os.getenv("CML_BUILD_POLL_INTERVAL", "15"))
+    deadline = time.monotonic() + timeout
+    status = build.status
+    while time.monotonic() < deadline:
+        current = ml_model_build_client.describe_build(
+            existing_ml_project.id,
+            existing_ml_model.id,
+            build.id,
+        )
+        status = current.status if current else status
+        if status in _ML_BUILD_SUCCESS:
+            build = current
+            break
+        if status in _ML_BUILD_FAILURE:
+            pytest.fail(f"Model build {build.id} ended in status '{status}'")
+        time.sleep(interval)
+    else:
+        pytest.fail(
+            f"Model build {build.id} did not finish within {timeout}s "
+            f"(last status '{status}')",
+        )
+
+    yield build
+
+    try:
+        if isinstance(build.id, str):
+            ml_model_build_client.delete_build(
+                existing_ml_project.id,
+                existing_ml_model.id,
+                build.id,
+            )
+    except Exception as e:
+        log.info(f"Failed to delete build {build.id} during cleanup: {str(e)}")
+
+
+@pytest.fixture
+def purge_ml_model_deployment(
+    ml_model_deployment_client,
+) -> Generator[Callable[[str, str, str, MlModelDeployment], MlModelDeployment], None, None]:
+    """Factory fixture to register CML model deployments for cleanup after the test."""
+    deployments: List[tuple] = []
+
+    def _add_deployment(
+        project_id: str,
+        model_id: str,
+        build_id: str,
+        deployment: MlModelDeployment,
+    ) -> MlModelDeployment:
+        deployments.append((project_id, model_id, build_id, deployment))
+        return deployment
+
+    yield _add_deployment
+
+    # Clean up after the test: stop then delete (best effort).
+    for project_id, model_id, build_id, deployment in deployments:
+        if not isinstance(deployment.id, str):
+            continue
+        for action in (
+            ml_model_deployment_client.stop_deployment,
+            ml_model_deployment_client.delete_deployment,
+        ):
+            try:
+                action(project_id, model_id, build_id, deployment.id)
+            except Exception as e:
+                log.info(
+                    f"Failed to {action.__name__} {deployment.id} during cleanup: {str(e)}",
+                )
