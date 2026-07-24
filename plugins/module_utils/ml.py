@@ -365,6 +365,7 @@ class MlModel:
     description: Union[str, None, NULLABLE] = NULLABLE
     access_key: Union[str, None, NULLABLE] = NULLABLE
     auth_enabled: Union[bool, None, NULLABLE] = NULLABLE
+    creator: Union[Dict[str, Any], None, NULLABLE] = NULLABLE
     created_at: Union[str, None, NULLABLE] = NULLABLE
     updated_at: Union[str, None, NULLABLE] = NULLABLE
 

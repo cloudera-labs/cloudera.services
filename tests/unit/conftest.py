@@ -70,6 +70,7 @@ from ansible_collections.cloudera.services.plugins.module_utils.ml import (
     MlJob,
     MlJobClient,
     MlJobRunClient,
+    MlModel,
     MlModelClient,
     MlApplication,
     MlApplicationClient,
@@ -1434,6 +1435,88 @@ def deletable_ml_job(
     purge_ml_job(existing_ml_project.id, job)
 
     yield job
+
+
+@pytest.fixture
+def purge_ml_model(
+    ml_model_client,
+) -> Generator[Callable[[str, MlModel], MlModel], None, None]:
+    """Factory fixture to register CML models for cleanup after the test."""
+    models: List[tuple] = []
+
+    def _add_model(project_id: str, model: MlModel) -> MlModel:
+        models.append((project_id, model))
+        return model
+
+    yield _add_model
+
+    # Clean up after the test
+    for project_id, model in models:
+        try:
+            if isinstance(model.id, str):
+                ml_model_client.delete_model(project_id, model.id)
+        except Exception as e:
+            log.info(f"Failed to delete model {model.id} during cleanup: {str(e)}")
+
+
+@pytest.fixture(scope="module")
+def existing_ml_model(
+    existing_ml_project,
+    ml_model_client,
+) -> Generator[MlModel, None, None]:
+    """Fixture to create a module-scoped CML model and clean it up afterwards."""
+    name = "existing-model"
+
+    # Clean up any existing test model with the same name
+    for model in ml_model_client.list_models(existing_ml_project.id):
+        if model.name == name and isinstance(model.id, str):
+            ml_model_client.delete_model(existing_ml_project.id, model.id)
+
+    model = ml_model_client.create_model(
+        existing_ml_project.id,
+        MlModel(
+            name=name,
+            description="An existing model for integration tests.",
+        ),
+    )
+
+    yield model
+
+    # Clean up after the test (module scope, cannot use purge_ml_model fixture)
+    try:
+        if isinstance(model.id, str):
+            ml_model_client.delete_model(existing_ml_project.id, model.id)
+    except Exception as e:
+        log.info(f"Failed to delete model {model.id} during cleanup: {str(e)}")
+
+
+@pytest.fixture()
+def deletable_ml_model(
+    request,
+    existing_ml_project,
+    ml_model_client,
+    purge_ml_model,
+) -> Generator[MlModel, None, None]:
+    """Fixture to create a function-scoped CML model and clean it up if needed."""
+    name = f"del-{request.node.name.lower()}"[:100]
+
+    # Clean up any existing test model with the same name
+    for model in ml_model_client.list_models(existing_ml_project.id):
+        if model.name == name and isinstance(model.id, str):
+            ml_model_client.delete_model(existing_ml_project.id, model.id)
+
+    model = ml_model_client.create_model(
+        existing_ml_project.id,
+        MlModel(
+            name=name,
+            description="A deletable model for integration tests.",
+        ),
+    )
+
+    # Register for deletion after test
+    purge_ml_model(existing_ml_project.id, model)
+
+    yield model
 
 
 @pytest.fixture(scope="module")
