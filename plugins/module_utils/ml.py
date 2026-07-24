@@ -799,11 +799,34 @@ class MlRuntime:
     editor: Union[str, None, NULLABLE] = NULLABLE
     description: Union[str, None, NULLABLE] = NULLABLE
     full_version: Union[str, None, NULLABLE] = NULLABLE
+    status: Union[str, None, NULLABLE] = NULLABLE
+    register_user_id: Union[int, None, NULLABLE] = NULLABLE
     runtime_metadata_version: Union[int, None, NULLABLE] = NULLABLE
 
 
+@dataclass
+class MlRuntimeRegistration:
+    """The result of registering a custom CML runtime."""
+
+    validation_success: Union[bool, None, NULLABLE] = NULLABLE
+    insert_success: Union[bool, None, NULLABLE] = NULLABLE
+    reason: Union[str, None, NULLABLE] = NULLABLE
+    reason_data: Union[str, None, NULLABLE] = NULLABLE
+    details: Union[Dict[str, Any], None, NULLABLE] = NULLABLE
+
+
+@dataclass
+class MlRuntimeValidation:
+    """The result of validating a custom CML runtime image."""
+
+    success: Union[bool, None, NULLABLE] = NULLABLE
+    reason: Union[str, None, NULLABLE] = NULLABLE
+    reason_data: Union[str, None, NULLABLE] = NULLABLE
+    details: Union[Dict[str, Any], None, NULLABLE] = NULLABLE
+
+
 class MlRuntimeClient:
-    """CML Runtime API client (read-only)."""
+    """CML Runtime API client."""
 
     def __init__(self, api_client: ServicesClient) -> None:
         self.api_client: ServicesClient = api_client
@@ -816,6 +839,63 @@ class MlRuntimeClient:
         resp = self._list_runtimes()
         return [from_dict(MlRuntime, r) for r in resp.get("runtimes", [])]
 
+    def validate_runtime(
+        self,
+        url: str,
+        docker_credential_id: Optional[str] = None,
+    ) -> MlRuntimeValidation:
+        """Validate a custom runtime image by registry URL."""
+        params: Dict[str, Any] = {"url": url}
+        if docker_credential_id is not None:
+            params["docker_credential_id"] = docker_credential_id
+        return from_dict(
+            MlRuntimeValidation,
+            self.api_client.get(f"/{API_VERSION}/runtimes:validate", params=params),
+        )
+
+    def register_runtime(
+        self,
+        url: str,
+        docker_credential_id: Optional[str] = None,
+    ) -> MlRuntimeRegistration:
+        """Register a custom runtime by registry URL."""
+        body: Dict[str, Any] = {"url": url}
+        if docker_credential_id is not None:
+            body["docker_credential_id"] = docker_credential_id
+        return from_dict(
+            MlRuntimeRegistration,
+            self.api_client.post(f"/{API_VERSION}/runtimes", data=body),
+        )
+
+    def update_runtime_status(
+        self,
+        status: str,
+        runtime_id: Optional[List[int]] = None,
+        image_identifier: Optional[List[str]] = None,
+    ) -> int:
+        """Update the status of selected runtimes; returns rows affected."""
+        body: Dict[str, Any] = {"status": status}
+        if runtime_id is not None:
+            body["runtime_id"] = runtime_id
+        if image_identifier is not None:
+            body["image_identifier"] = image_identifier
+        resp = self.api_client.post(f"/{API_VERSION}/runtimes:update", data=body)
+        return resp.get("rows_affected", 0) if isinstance(resp, dict) else 0
+
+    def set_docker_credential(
+        self,
+        docker_credential_id: str,
+        runtime_identifier: str,
+    ) -> None:
+        """Set a Docker credential for a runtime."""
+        self.api_client.post(
+            f"/{API_VERSION}/runtimes/credential:set",
+            data={
+                "docker_credential_id": docker_credential_id,
+                "runtime_identifier": runtime_identifier,
+            },
+        )
+
 
 @dataclass
 class MlRuntimeAddon:
@@ -825,10 +905,14 @@ class MlRuntimeAddon:
     component: Union[str, None, NULLABLE] = NULLABLE
     display_name: Union[str, None, NULLABLE] = NULLABLE
     status: Union[str, None, NULLABLE] = NULLABLE
+    manageable: Union[bool, None, NULLABLE] = NULLABLE
+    created_at: Union[str, None, NULLABLE] = NULLABLE
+    id: Union[int, None, NULLABLE] = NULLABLE
+    reason: Union[str, None, NULLABLE] = NULLABLE
 
 
 class MlRuntimeAddonClient:
-    """CML Runtime Addon API client (read-only)."""
+    """CML Runtime Addon API client."""
 
     def __init__(self, api_client: ServicesClient) -> None:
         self.api_client: ServicesClient = api_client
@@ -840,6 +924,70 @@ class MlRuntimeAddonClient:
     def list_runtime_addons(self) -> List[MlRuntimeAddon]:
         resp = self._list_runtime_addons()
         return [from_dict(MlRuntimeAddon, a) for a in resp.get("runtime_addons", [])]
+
+    def update_addon_status(
+        self,
+        status: str,
+        ids: Optional[List[int]] = None,
+        identifiers: Optional[List[str]] = None,
+    ) -> int:
+        """Update the status of selected runtime addons; returns rows affected."""
+        body: Dict[str, Any] = {"status": status}
+        if ids is not None:
+            body["ids"] = ids
+        if identifiers is not None:
+            body["identifiers"] = identifiers
+        resp = self.api_client.post(
+            f"/{API_VERSION}/runtimeaddons:updatestatus",
+            data=body,
+        )
+        return resp.get("rows_affected", 0) if isinstance(resp, dict) else 0
+
+
+@dataclass
+class MlRuntimeRepo:
+    """A CML runtime repository."""
+
+    id: Union[int, None, NULLABLE] = NULLABLE
+    name: Union[str, None, NULLABLE] = NULLABLE
+    url: Union[str, None, NULLABLE] = NULLABLE
+
+
+class MlRuntimeRepoClient:
+    """CML Runtime Repository API client."""
+
+    def __init__(self, api_client: ServicesClient) -> None:
+        self.api_client: ServicesClient = api_client
+
+    @_cml_paginated
+    def _list_runtime_repos(self, **params) -> Dict[str, Any]:
+        return self.api_client.get(f"/{API_VERSION}/runtimerepos", params=params)
+
+    def list_runtime_repos(self) -> List[MlRuntimeRepo]:
+        resp = self._list_runtime_repos()
+        return [from_dict(MlRuntimeRepo, r) for r in resp.get("runtimerepos", [])]
+
+    def create_runtime_repo(self, repo: MlRuntimeRepo) -> MlRuntimeRepo:
+        return from_dict(
+            MlRuntimeRepo,
+            self.api_client.post(
+                f"/{API_VERSION}/runtimerepos",
+                data={"name": repo.name, "url": repo.url},
+            ),
+        )
+
+    def update_runtime_repo(self, repo: MlRuntimeRepo) -> MlRuntimeRepo:
+        """Update a runtime repo (PATCH). ``repo.id`` must be set."""
+        return from_dict(
+            MlRuntimeRepo,
+            self.api_client.patch(
+                f"/{API_VERSION}/runtimerepos/{repo.id}",
+                data=to_dict(repo),
+            ),
+        )
+
+    def delete_runtime_repo(self, repo_id: int) -> None:
+        self.api_client.delete(f"/{API_VERSION}/runtimerepos/{repo_id}")
 
 
 # ---------------------------------------------------------------------------
