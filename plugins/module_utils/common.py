@@ -1139,8 +1139,10 @@ class AnsibleServicesClient(ServicesClient):
                         except:
                             pass
 
-                    # Retry on server errors (5xx) or specific client errors
-                    if status_code >= 500 or status_code in [408, 429]:
+                    # Retry on connection-level failures (fetch_url reports a
+                    # dropped/failed connection as a negative status with no
+                    # exception), server errors (5xx), or specific client errors.
+                    if status_code < 0 or status_code >= 500 or status_code in [408, 429]:
                         if attempt < max_retries - 1:
                             # Exponential backoff: 0.5s, 1s, 2s, 4s, 5s (max)
                             wait_time = min(0.5 * (2**attempt), 5)
