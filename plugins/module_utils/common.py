@@ -985,7 +985,7 @@ class AnsibleServicesClient(ServicesClient):
         headers: Dict[str, str] = {},
         squelch: Dict[int, Any] = {},
         passthru: List[int] = [],
-        max_retries: int = 3,
+        max_retries: int = 5,
         **kwargs,
     ) -> Any:
         """
