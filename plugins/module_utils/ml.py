@@ -515,7 +515,10 @@ class MlModelDeployment:
     status: Union[str, None, NULLABLE] = NULLABLE
     cpu: Union[float, None, NULLABLE] = NULLABLE
     memory: Union[float, None, NULLABLE] = NULLABLE
+    nvidia_gpus: Union[int, None, NULLABLE] = NULLABLE
     replicas: Union[int, None, NULLABLE] = NULLABLE
+    environment: Union[Dict[str, Any], None, NULLABLE] = NULLABLE
+    deployer: Union[Dict[str, Any], None, NULLABLE] = NULLABLE
     created_at: Union[str, None, NULLABLE] = NULLABLE
     updated_at: Union[str, None, NULLABLE] = NULLABLE
 
@@ -589,6 +592,20 @@ class MlModelDeploymentClient:
     ) -> None:
         self.api_client.delete(
             f"/{API_VERSION}/projects/{project_id}/models/{model_id}/builds/{build_id}/deployments/{deployment_id}",
+        )
+
+    def stop_deployment(
+        self,
+        project_id: str,
+        model_id: str,
+        build_id: str,
+        deployment_id: str,
+    ) -> MlModelDeployment:
+        return from_dict(
+            MlModelDeployment,
+            self.api_client.post(
+                f"/{API_VERSION}/projects/{project_id}/models/{model_id}/builds/{build_id}/deployments/{deployment_id}:stop",
+            ),
         )
 
 

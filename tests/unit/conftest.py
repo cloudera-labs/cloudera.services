@@ -74,6 +74,7 @@ from ansible_collections.cloudera.services.plugins.module_utils.ml import (
     MlModelClient,
     MlModelBuild,
     MlModelBuildClient,
+    MlModelDeploymentClient,
     MlApplication,
     MlApplicationClient,
     MlFile,
@@ -1132,6 +1133,12 @@ def ml_model_client(ml_rest_client) -> MlModelClient:
 def ml_model_build_client(ml_rest_client) -> MlModelBuildClient:
     """Fixture to create an MlModelBuildClient instance."""
     return MlModelBuildClient(api_client=ml_rest_client)
+
+
+@pytest.fixture(scope="module")
+def ml_model_deployment_client(ml_rest_client) -> MlModelDeploymentClient:
+    """Fixture to create an MlModelDeploymentClient instance."""
+    return MlModelDeploymentClient(api_client=ml_rest_client)
 
 
 @pytest.fixture(scope="module")
