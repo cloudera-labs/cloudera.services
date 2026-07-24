@@ -15,225 +15,415 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
-
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.cloudera.services.plugins.module_utils.ml import (
-    MLModule,
-    difference,
-    validate_project_id,
-)
-
-ANSIBLE_METADATA = {
-    "metadata_version": "1.1",
-    "status": ["preview"],
-    "supported_by": "community",
-}
-
 DOCUMENTATION = r"""
----
 module: ml_project_model_build
-short_description: Create, update, and delete a Cloudera Machine Learning (CML) project model build.
+short_description: Manage a Cloudera Machine Learning (CML) project model build
 description:
-  - Create, update, and delete a Cloudera Machine Learning (CML) project model build.
-  - The module supports check_mode.
-  - The module supports the C(v2) API only.
+  - Create or delete a Cloudera Machine Learning (CML) project model build.
+  - Model builds are immutable; an existing build is never updated in place. To
+    change a build, create a new one or delete and recreate it.
+  - The module supports C(check_mode).
 author:
   - "Webster Mudge (@wmudge)"
 version_added: "1.0.0"
-requirements:
-  - requests
 options:
-  debug:
+  project_name:
     description:
-      - Flag to capture and return the debugging log of the underlying CDP SDK.
-      - If set, the log level will be set from ERROR to DEBUG.
+      - The name of the enclosing project for the model.
+      - Mutually exclusive with O(project_id).
+    type: str
+    required: false
+  project_id:
+    description:
+      - The unique identifier of the enclosing project for the model.
+      - Mutually exclusive with O(project_name).
+    type: str
+    required: false
+  model_name:
+    description:
+      - The name of the enclosing model for the build.
+      - Mutually exclusive with O(model_id).
+    type: str
+    required: false
+  model_id:
+    description:
+      - The unique identifier of the enclosing model for the build.
+      - Mutually exclusive with O(model_name).
+    type: str
+    required: false
+  id:
+    description:
+      - The unique identifier of an existing build.
+      - Required to reference an existing build, e.g. to delete it.
+      - Mutually exclusive with O(file).
+    type: str
+    required: false
     aliases:
-      - debug_cdpsdk
-    default: False
-    type: bool
+      - build_id
+  comment:
+    description:
+      - A comment for the build.
+      - Applied only on build creation.
+    type: str
+    required: false
+  file:
+    description:
+      - The entrypoint file for the build.
+      - Required when creating a build.
+      - Mutually exclusive with O(id).
+    type: str
+    required: false
+    aliases:
+      - file_path
+  function:
+    description:
+      - The entrypoint function within O(file) for the build.
+      - Required when creating a build.
+    type: str
+    required: false
+    aliases:
+      - function_name
+  kernel:
+    description:
+      - The kernel to use for the build.
+      - Requires O(runtime).
+    type: str
+    required: false
+    choices:
+      - python3
+      - python2
+      - r
+  addons:
+    description:
+      - A list of runtime addon identifiers for the build.
+      - Requires O(runtime).
+    type: list
+    elements: str
+    required: false
+    aliases:
+      - runtime_addon_ids
+      - runtime_addon_identifiers
+  runtime:
+    description:
+      - The container runtime identifier for the build.
+      - Required when creating a build.
+    type: str
+    required: false
+    aliases:
+      - runtime_id
+      - runtime_identifier
+  state:
+    description:
+      - The declarative state of the build.
+    type: str
+    required: false
+    default: present
+    choices:
+      - present
+      - absent
+extends_documentation_fragment:
+  - cloudera.services.ml_client
+  - cloudera.services.services_client
 """
 
 EXAMPLES = r"""
+- name: Create a model build
+  cloudera.services.ml_project_model_build:
+    url: "https://ml-workspace.example.com"
+    api_key: "{{ cml_api_key }}"
+    project_name: my-project
+    model_name: fraud-detector
+    file: predict.py
+    function: predict
+    runtime: "{{ runtime_id }}"
+    comment: Initial build
+    state: present
 
+- name: Delete a model build
+  cloudera.services.ml_project_model_build:
+    project_id: "{{ project_id }}"
+    model_id: "{{ model_id }}"
+    id: "{{ build_id }}"
+    state: absent
 """
 
 RETURN = r"""
----
+build:
+  description: The CML model build details.
+  returned: always
+  type: dict
+  contains:
+    id:
+      description: The unique identifier of the build.
+      type: str
+      returned: always
+    model_id:
+      description: The identifier of the enclosing model.
+      type: str
+      returned: when available
+    project_id:
+      description: The identifier of the enclosing project.
+      type: str
+      returned: when available
+    status:
+      description: The status of the build.
+      type: str
+      returned: when available
+    file_path:
+      description: The entrypoint file for the build.
+      type: str
+      returned: when available
+    function_name:
+      description: The entrypoint function for the build.
+      type: str
+      returned: when available
+    kernel:
+      description: The kernel for the build.
+      type: str
+      returned: when available
+    runtime_identifier:
+      description: The container runtime identifier for the build.
+      type: str
+      returned: when available
+    runtime_addon_identifiers:
+      description: The runtime addon identifiers for the build.
+      type: list
+      elements: str
+      returned: when available
+    comment:
+      description: The comment for the build.
+      type: str
+      returned: when available
+    crn:
+      description: The CRN of the build.
+      type: str
+      returned: when available
+    creator:
+      description: Details of the user that created the build.
+      type: dict
+      returned: when available
+    created_at:
+      description: The timestamp when the build was created.
+      type: str
+      returned: when available
+    updated_at:
+      description: The timestamp when the build was last updated.
+      type: str
+      returned: when available
 sdk_out:
-    description: Returns the captured CDP SDK log.
-    returned: when supported
-    type: str
+  description: Returns the captured REST API log.
+  returned: when supported
+  type: str
 sdk_out_lines:
-    description: Returns a list of each line of the captured CDP SDK log.
-    returned: when supported
-    type: list
-    elements: str
+  description: Returns a list of each line of the captured REST API log.
+  returned: when supported
+  type: list
+  elements: str
 """
 
+from typing import Any, Dict, NoReturn, Optional
 
-class MLProjectModelBuild(MLModule):
-    def __init__(self, module):
-        super(MLProjectModelBuild, self).__init__(module)
+from ansible_collections.cloudera.services.plugins.module_utils.common import (
+    to_dict,
+)
+from ansible_collections.cloudera.services.plugins.module_utils.ml import (
+    MlServicesModule,
+    MlModel,
+    MlModelClient,
+    MlModelBuild,
+    MlModelBuildClient,
+    MlProject,
+    MlProjectClient,
+    validate_project_id,
+)
+
+
+class MlProjectModelBuildModule(MlServicesModule):
+    def __init__(self):
+        super().__init__(
+            argument_spec=dict(
+                project_name=dict(type="str", required=False),
+                project_id=dict(type="str", required=False),
+                model_name=dict(type="str", required=False),
+                model_id=dict(type="str", required=False),
+                id=dict(type="str", required=False, aliases=["build_id"]),
+                comment=dict(type="str", required=False),
+                file=dict(type="str", required=False, aliases=["file_path"]),
+                function=dict(type="str", required=False, aliases=["function_name"]),
+                kernel=dict(
+                    type="str",
+                    required=False,
+                    choices=["python3", "python2", "r"],
+                ),
+                addons=dict(
+                    type="list",
+                    elements="str",
+                    required=False,
+                    aliases=["runtime_addon_ids", "runtime_addon_identifiers"],
+                ),
+                runtime=dict(
+                    type="str",
+                    required=False,
+                    aliases=["runtime_id", "runtime_identifier"],
+                ),
+                state=dict(
+                    type="str",
+                    required=False,
+                    choices=["present", "absent"],
+                    default="present",
+                ),
+            ),
+            mutually_exclusive=[
+                ["project_name", "project_id"],
+                ["model_name", "model_id"],
+                ["id", "file"],
+            ],
+            required_one_of=[
+                ["project_name", "project_id"],
+                ["model_name", "model_id"],
+                ["id", "file"],
+            ],
+            required_together=[
+                ["file", "function", "runtime"],
+            ],
+            required_by={
+                "kernel": ["runtime"],
+                "addons": ["runtime"],
+            },
+            supports_check_mode=True,
+        )
 
         # Set parameters
-        self.project_name = self._get_param("project_name")
-        self.project_id = self._get_param("project_id")
-        self.model_name = self._get_param("model_name")
-        self.model_id = self._get_param("model_id")
-        self.id = self._get_param("id")
-        self.comment = self._get_param("comment")
-        self.file = self._get_param("file")
-        self.function = self._get_param("function")
-        self.kernel = self._get_param("kernel")
-        self.addons = self._get_param("addons")
-        self.runtime = self._get_param("runtime")
-        self.state = self._get_param("state")
+        self.project_name = self.get_param("project_name")
+        self.project_id = self.get_param("project_id")
+        self.model_name = self.get_param("model_name")
+        self.model_id = self.get_param("model_id")
+        self.id = self.get_param("id")
+        self.comment = self.get_param("comment")
+        self.file = self.get_param("file")
+        self.function = self.get_param("function")
+        self.kernel = self.get_param("kernel")
+        self.addons = self.get_param("addons")
+        self.runtime = self.get_param("runtime")
+        self.state = self.get_param("state")
 
         # Initialize the return values
         self.changed = False
-        self.build = {}
+        self.diff = {}
+        self.build: Optional[MlModelBuild] = None
 
-        # Execute logic process
-        self.process()
+    def _fail(self, msg: str) -> NoReturn:
+        # AnsibleModule.fail_json raises SystemExit at runtime; the trailing
+        # raise is unreachable but marks this method as NoReturn so the type
+        # checker can narrow values validated ahead of a failure.
+        self.module.fail_json(msg=msg)
+        raise SystemExit(msg)
 
-    @MLModule.process_debug
-    def process(self):
-        project = None
+    def _resolve_project_id(self) -> str:
+        client = MlProjectClient(self.api_client)
+        project: Optional[MlProject] = None
         if self.project_id:
             if not validate_project_id(self.project_id):
-                self.module.fail_json(msg="Invalid Project ID: " + self.id)
-            project = self.get_project(self.project_id)
+                self._fail("Invalid Project ID: %s" % self.project_id)
+            project = client.describe_project(self.project_id)
         else:
-            project = self.find_project(self.project_name)
-
-        if not project:
-            self.module.fail_json(msg="Project not found")
-
-        model = None
-        if self.model_id:
-            model = self.get_model(project["id"], self.model_id)
-        else:
-            model = self.find_model(project["id"], self.model_name)
-
-        if not model:
-            self.module.fail_json(msg="Model not found")
-
-        existing = None
-        if self.id:
-            existing = self.get_build(project["id"], model["id"], self.id)
-
-        if self.state == "present":
-            payload = dict()
-            if self.comment:
-                payload.update(comment=self.comment)
-            if self.file:
-                payload.update(file_path=self.file)
-            if self.function:
-                payload.update(function_name=self.function)
-            if self.kernel:
-                payload.update(kernel=self.kernel)
-            if self.addons:
-                payload.update(runtime_addon_identifiers=self.addons)
-            if self.runtime:
-                payload.update(runtime_identifier=self.runtime)
-
-            if existing:
-                diff = difference(payload, existing)
-                if diff:
-                    self.module.warn(
-                        "Build exists and build reconciliation is not supported. "
-                        + "To change, explicitly delete and recreate the build.",
-                    )
-                self.build = existing
-            else:
-                if not self.module.check_mode:
-                    self.changed = True
-                    self.build = self.query(
-                        method="POST",
-                        api=[
-                            "projects",
-                            project["id"],
-                            "models",
-                            model["id"],
-                            "builds",
-                        ],
-                        body=payload,
-                    )
-        elif existing and not self.module.check_mode:
-            self.changed = True
-            self.query(
-                method="DELETE",
-                api=[
-                    "projects",
-                    project["id"],
-                    "models",
-                    model["id"],
-                    "builds",
-                    existing["id"],
-                ],
+            project = next(
+                (p for p in client.list_projects() if p.name == self.project_name),
+                None,
             )
+        if not project:
+            self._fail("Project not found")
+        if not isinstance(project.id, str):
+            self._fail("Project ID is invalid from resolved project.")
+        return project.id
+
+    def _resolve_model_id(self, project_id: str) -> str:
+        client = MlModelClient(self.api_client)
+        model: Optional[MlModel] = None
+        if self.model_id:
+            model = client.describe_model(project_id, self.model_id)
+        else:
+            model = next(
+                (m for m in client.list_models(project_id) if m.name == self.model_name),
+                None,
+            )
+        if not model:
+            self._fail("Model not found")
+        if not isinstance(model.id, str):
+            self._fail("Model ID is invalid from resolved model.")
+        return model.id
+
+    def _incoming_build(self) -> MlModelBuild:
+        incoming = MlModelBuild()
+        if self.file is not None:
+            incoming.file_path = self.file
+        if self.function is not None:
+            incoming.function_name = self.function
+        if self.kernel is not None:
+            incoming.kernel = self.kernel
+        if self.addons is not None:
+            incoming.runtime_addon_identifiers = self.addons
+        if self.runtime is not None:
+            incoming.runtime_identifier = self.runtime
+        if self.comment is not None:
+            incoming.comment = self.comment
+        return incoming
+
+    def process(self) -> None:
+        project_id = self._resolve_project_id()
+        model_id = self._resolve_model_id(project_id)
+        client = MlModelBuildClient(self.api_client)
+
+        existing: Optional[MlModelBuild] = None
+        if self.id:
+            existing = client.describe_build(project_id, model_id, self.id)
+
+        if self.state == "absent":
+            if existing:
+                if not isinstance(existing.id, str):
+                    self._fail("Build ID is invalid from existing build.")
+                self.changed = True
+                if self.module._diff:
+                    self.diff = {"before": to_dict(existing), "after": None}
+                if not self.module.check_mode:
+                    client.delete_build(project_id, model_id, existing.id)
+            return
+
+        # present implies the build should exist.
+        if existing:
+            # Model builds are immutable; return the existing build unchanged.
+            self.build = existing
+            return
+
+        if self.id:
+            # An explicit build id was given but no such build exists.
+            self._fail("Build not found")
+
+        incoming = self._incoming_build()
+        self.changed = True
+        if self.module._diff:
+            self.diff = {"before": None, "after": to_dict(incoming)}
+        if not self.module.check_mode:
+            self.build = client.create_build(project_id, model_id, incoming)
+        else:
+            self.build = incoming
 
 
 def main():
-    module = MLProjectModelBuild.ansible_module(
-        argument_spec=dict(
-            project_name=dict(required=False, type="str"),
-            project_id=dict(required=False, type="str"),
-            model_name=dict(required=False, type="str"),
-            model_id=dict(required=False, type="str"),
-            id=dict(required=False, type="str"),
-            comment=dict(required=False, type="str"),
-            file=dict(required=False, type="str", aliases=["file_path"]),
-            function=dict(required=False, type="str", aliases=["function_name"]),
-            kernel=dict(
-                required=False,
-                type="str",
-                choices=["python3", "python2", "r"],
-            ),
-            addons=dict(
-                required=False,
-                type="list",
-                elements="str",
-                aliases=["runtime_addon_ids"],
-            ),
-            runtime=dict(required=False, type="str", aliases=["runtime_id"]),
-            state=dict(
-                required=False,
-                type="str",
-                choices=["present", "absent"],
-                default="present",
-            ),
-        ),
-        required_one_of=[
-            ["project_name", "project_id"],
-            ["model_name", "model_id"],
-            ["id", "file"],
-        ],
-        required_together=[
-            ["file", "function", "runtime"],
-        ],
-        required_by={
-            "kernel": ["runtime"],
-            "addons": ["runtime"],
-        },
-        supports_check_mode=True,
-    )
+    result = MlProjectModelBuildModule()
 
-    result = MLProjectModelBuild(module)
-
-    output = dict(
+    output: Dict[str, Any] = dict(
         changed=result.changed,
-        build=result.build,
+        build=to_dict(result.build) if result.build else {},
     )
 
-    if result.debug:
+    if result.debug_log:
         output.update(
             sdk_out=result.log_out,
             sdk_out_lines=result.log_lines,
         )
 
-    module.exit_json(**output)
+    result.module.exit_json(**output)
 
 
 if __name__ == "__main__":
