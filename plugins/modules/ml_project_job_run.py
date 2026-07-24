@@ -15,177 +15,393 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import time
-
-from ansible.module_utils.basic import AnsibleModule
-from ansible_collections.cloudera.services.plugins.module_utils.ml import (
-    MLModule,
-    difference,
-    validate_project_id,
-)
-
-ANSIBLE_METADATA = {
-    "metadata_version": "1.1",
-    "status": ["preview"],
-    "supported_by": "community",
-}
-
 DOCUMENTATION = r"""
----
 module: ml_project_job_run
-short_description: Start and stop a Cloudera Machine Learning (CML) project job.
+short_description: Start or stop a Cloudera Machine Learning (CML) project job run
 description:
-  - Start and stop a Cloudera Machine Learning (CML) project job.
-  - The module supports check_mode.
-  - The module supports the C(v2) API only.
+  - Start or stop a run of a Cloudera Machine Learning (CML) project job.
+  - The module is idempotent with respect to the job's most recent run.
+  - The module supports C(check_mode).
 author:
   - "Webster Mudge (@wmudge)"
 version_added: "1.0.0"
-requirements:
-  - requests
 options:
-  debug:
+  project_name:
     description:
-      - Flag to capture and return the debugging log of the underlying CDP SDK.
-      - If set, the log level will be set from ERROR to DEBUG.
+      - The name of the enclosing project for the job.
+      - Mutually exclusive with O(project_id).
+    type: str
+    required: false
+  project_id:
+    description:
+      - The unique identifier of the enclosing project for the job.
+      - Mutually exclusive with O(project_name).
+    type: str
+    required: false
+  name:
+    description:
+      - The name of the job to run.
+      - Mutually exclusive with O(id).
+    type: str
+    required: false
     aliases:
-      - debug_cdpsdk
-    default: False
+      - job
+  id:
+    description:
+      - The unique identifier of the job to run.
+      - Mutually exclusive with O(name).
+    type: str
+    required: false
+    aliases:
+      - job_id
+  arguments:
+    description:
+      - The command-line arguments passed to the job run.
+      - Applied only when starting a new run.
+    type: str
+    required: false
+  env:
+    description:
+      - Environment variables to set on the job run.
+      - Applied only when starting a new run.
+    type: dict
+    required: false
+    aliases:
+      - env_vars
+  wait:
+    description:
+      - Whether to wait for the run to reach a terminal state.
     type: bool
+    required: false
+    default: false
+  delay:
+    description:
+      - The interval, in seconds, between status checks when O(wait=true).
+    type: int
+    required: false
+    default: 15
+  wait_timeout:
+    description:
+      - The maximum time, in seconds, to wait for a terminal state when O(wait=true).
+    type: int
+    required: false
+    default: 3600
+    aliases:
+      - execution_timeout
+  state:
+    description:
+      - The declarative state of the job run.
+      - V(started) ensures a run is active, starting one if the latest run is not already active.
+      - V(stopped) ensures the latest run is not active, stopping it if necessary.
+    type: str
+    required: false
+    default: started
+    choices:
+      - started
+      - stopped
+extends_documentation_fragment:
+  - cloudera.services.ml_client
+  - cloudera.services.services_client
 """
 
 EXAMPLES = r"""
+- name: Start a job run
+  cloudera.services.ml_project_job_run:
+    url: "https://ml-workspace.example.com"
+    api_key: "{{ cml_api_key }}"
+    project_name: my-project
+    name: nightly-etl
+    state: started
 
+- name: Start a job run and wait for it to succeed
+  cloudera.services.ml_project_job_run:
+    project_id: "{{ project_id }}"
+    id: "{{ job_id }}"
+    arguments: "--verbose"
+    wait: true
+    wait_timeout: 1800
+
+- name: Stop the active run of a job
+  cloudera.services.ml_project_job_run:
+    project_id: "{{ project_id }}"
+    name: nightly-etl
+    state: stopped
 """
 
 RETURN = r"""
----
+job_run:
+  description: The CML job run details.
+  returned: always
+  type: dict
+  contains:
+    id:
+      description: The unique identifier of the job run.
+      type: str
+      returned: always
+    job_id:
+      description: The identifier of the enclosing job.
+      type: str
+      returned: when available
+    project_id:
+      description: The identifier of the enclosing project.
+      type: str
+      returned: when available
+    status:
+      description: The status of the job run.
+      type: str
+      returned: when available
+    arguments:
+      description: The command-line arguments passed to the job run.
+      type: str
+      returned: when available
+    environment:
+      description: The environment variables of the job run.
+      type: dict
+      returned: when available
+    creator:
+      description: Details of the user that started the job run.
+      type: dict
+      returned: when available
+    created_at:
+      description: The timestamp when the job run was created.
+      type: str
+      returned: when available
+    scheduling_at:
+      description: The timestamp when the job run was scheduled.
+      type: str
+      returned: when available
+    starting_at:
+      description: The timestamp when the job run started.
+      type: str
+      returned: when available
+    finished_at:
+      description: The timestamp when the job run finished.
+      type: str
+      returned: when available
 sdk_out:
-    description: Returns the captured CDP SDK log.
-    returned: when supported
-    type: str
+  description: Returns the captured REST API log.
+  returned: when supported
+  type: str
 sdk_out_lines:
-    description: Returns a list of each line of the captured CDP SDK log.
-    returned: when supported
-    type: list
-    elements: str
+  description: Returns a list of each line of the captured REST API log.
+  returned: when supported
+  type: list
+  elements: str
 """
 
-# ENGINE_SCHEDULING, ENGINE_STARTING, ENGINE_RUNNING, ENGINE_STOPPING, ENGINE_STOPPED,
-# ENGINE_UNKNOWN, ENGINE_SUCCEEDED, ENGINE_FAILED, ENGINE_TIMEDOUT
+import time
+
+from typing import Any, Dict, List, NoReturn, Optional
+
+from ansible_collections.cloudera.services.plugins.module_utils.common import (
+    to_dict,
+)
+from ansible_collections.cloudera.services.plugins.module_utils.ml import (
+    MlServicesModule,
+    MlJob,
+    MlJobClient,
+    MlJobRun,
+    MlJobRunClient,
+    MlProject,
+    MlProjectClient,
+    validate_project_id,
+)
+
+# States in which a run is considered active (i.e. not yet in a terminal state).
+ACTIVE_STATES = [
+    "ENGINE_SCHEDULING",
+    "ENGINE_STARTING",
+    "ENGINE_RUNNING",
+]
 
 
-class MLProjectJobRun(MLModule):
-    def __init__(self, module):
-        super(MLProjectJobRun, self).__init__(module)
+class MlProjectJobRunModule(MlServicesModule):
+    def __init__(self):
+        super().__init__(
+            argument_spec=dict(
+                project_name=dict(type="str", required=False),
+                project_id=dict(type="str", required=False),
+                name=dict(type="str", required=False, aliases=["job"]),
+                id=dict(type="str", required=False, aliases=["job_id"]),
+                arguments=dict(type="str", required=False),
+                env=dict(type="dict", required=False, aliases=["env_vars"]),
+                wait=dict(type="bool", required=False, default=False),
+                delay=dict(type="int", required=False, default=15),
+                wait_timeout=dict(
+                    type="int",
+                    required=False,
+                    default=3600,
+                    aliases=["execution_timeout"],
+                ),
+                state=dict(
+                    type="str",
+                    required=False,
+                    choices=["started", "stopped"],
+                    default="started",
+                ),
+            ),
+            mutually_exclusive=[
+                ["name", "id"],
+                ["project_name", "project_id"],
+            ],
+            required_one_of=[
+                ["name", "id"],
+                ["project_name", "project_id"],
+            ],
+            supports_check_mode=True,
+        )
 
         # Set parameters
-        self.project_name = self._get_param("project_name")
-        self.project_id = self._get_param("project_id")
-        self.name = self._get_param("name")
-        self.id = self._get_param("id")
-        self.arguments = self._get_param("arguments")
-        self.env = self._get_param("env")
-
-        self.state = self._get_param("state")
-        self.wait = self._get_param("wait")
-        self.delay = self._get_param("delay")
-        self.timeout = self._get_param("timeout")
+        self.project_name = self.get_param("project_name")
+        self.project_id = self.get_param("project_id")
+        self.name = self.get_param("name")
+        self.id = self.get_param("id")
+        self.arguments = self.get_param("arguments")
+        self.env = self.get_param("env")
+        self.wait = self.get_param("wait")
+        self.delay = self.get_param("delay")
+        self.run_timeout = self.get_param("wait_timeout")
+        self.state = self.get_param("state")
 
         # Initialize the return values
         self.changed = False
-        self.job_run = {}
+        self.job_run: Optional[MlJobRun] = None
 
-        # Execute logic process
-        self.process()
+    def _fail(self, msg: str) -> NoReturn:
+        # AnsibleModule.fail_json raises SystemExit at runtime; the trailing
+        # raise is unreachable but marks this method as NoReturn so the type
+        # checker can narrow values validated ahead of a failure.
+        self.module.fail_json(msg=msg)
+        raise SystemExit(msg)
 
-    @MLModule.process_debug
-    def process(self):
-        project = None
+    def _resolve_project_id(self) -> str:
+        client = MlProjectClient(self.api_client)
+        project: Optional[MlProject] = None
         if self.project_id:
             if not validate_project_id(self.project_id):
-                self.module.fail_json(msg="Invalid Project ID: " + self.id)
-            project = self.get_project(self.project_id)
+                self._fail("Invalid Project ID: %s" % self.project_id)
+            project = client.describe_project(self.project_id)
         else:
-            project = self.find_project(self.project_name)
-
+            project = next(
+                (p for p in client.list_projects() if p.name == self.project_name),
+                None,
+            )
         if not project:
-            self.module.fail_json(msg="Project not found")
+            self._fail("Project not found")
+        if not isinstance(project.id, str):
+            self._fail("Project ID is invalid from resolved project.")
+        return project.id
 
-        job = None
+    def _resolve_job_id(self, project_id: str, client: MlJobClient) -> str:
+        job: Optional[MlJob] = None
         if self.id:
-            job = self.get_job(project["id"], self.id)
+            job = client.describe_job(project_id, self.id)
         else:
-            job = self.find_job(project["id"], self.name)
-
+            job = next(
+                (j for j in client.list_jobs(project_id) if j.name == self.name),
+                None,
+            )
         if not job:
-            self.module.fail_json(msg="Job not found")
+            self._fail("Job not found")
+        if not isinstance(job.id, str):
+            self._fail("Job ID is invalid from resolved job.")
+        return job.id
 
-        history = self._get_history(project["id"], job["id"])
+    def _latest_run(
+        self,
+        client: MlJobRunClient,
+        project_id: str,
+        job_id: str,
+    ) -> Optional[MlJobRun]:
+        runs = client.list_job_runs(project_id, job_id)
+        # The list endpoint does not guarantee ordering; sort by creation time
+        # (most recent first) so the "latest" run is deterministic.
+        runs.sort(
+            key=lambda r: r.created_at if isinstance(r.created_at, str) else "",
+            reverse=True,
+        )
+        return runs[0] if runs else None
+
+    def _incoming_run(self) -> MlJobRun:
+        incoming = MlJobRun()
+        if self.arguments is not None:
+            incoming.arguments = self.arguments
+        if self.env is not None:
+            incoming.environment = self.env
+        return incoming
+
+    def _wait_for_state(
+        self,
+        client: MlJobRunClient,
+        project_id: str,
+        job_id: str,
+        success_status: List[str],
+        error_status: List[str],
+    ) -> MlJobRun:
+        deadline = time.time() + self.run_timeout
+        while time.time() < deadline:
+            latest = self._latest_run(client, project_id, job_id)
+            if latest is not None:
+                if latest.status in success_status:
+                    return latest
+                if latest.status in error_status:
+                    self._fail(
+                        "Failed to reach target status. Status: %s" % latest.status,
+                    )
+            time.sleep(self.delay)
+        self._fail("Failed to reach target status. Status: module timeout")
+
+    def process(self) -> None:
+        project_id = self._resolve_project_id()
+        job_client = MlJobClient(self.api_client)
+        job_id = self._resolve_job_id(project_id, job_client)
+
+        client = MlJobRunClient(self.api_client)
+        latest = self._latest_run(client, project_id, job_id)
 
         if self.state == "started":
-            # Start or scheduled to start
-            payload = dict()
-            if self.arguments:
-                payload.update(arguments=self.arguments)
-            if self.env:
-                payload.update(environment=self.env)
-
-            if not history or history[0]["status"] not in [
-                "ENGINE_STARTING",
-                "ENGINE_RUNNING",
-                "ENGINE_SCHEDULING",
-            ]:
-                # If never run or not currently started or scheduled to start
+            if latest is None or latest.status not in ACTIVE_STATES:
+                # No run yet, or the latest run is in a terminal state.
+                self.changed = True
                 if not self.module.check_mode:
-                    self.changed = True
-                    query = dict(
-                        method="POST",
-                        api=["projects", project["id"], "jobs", job["id"], "runs"],
+                    self.job_run = client.create_job_run(
+                        project_id,
+                        job_id,
+                        self._incoming_run(),
                     )
-                    if payload:
-                        query.update(body=payload)
-                    self.job_run = self.query(**query)
+                else:
+                    self.job_run = self._incoming_run()
             else:
-                # Else has started or currently scheduled to start
-                self.job_run = history[0]
-            if self.wait:
-                # Wait for a terminal condition
+                # A run is already active; re-applying is a no-op.
+                self.job_run = latest
+
+            if self.wait and not self.module.check_mode:
                 self.job_run = self._wait_for_state(
-                    project["id"],
-                    job["id"],
+                    client,
+                    project_id,
+                    job_id,
                     ["ENGINE_SUCCEEDED"],
                     ["ENGINE_FAILED", "ENGINE_UNKNOWN", "ENGINE_STOPPED"],
                 )
         else:
-            # Stopped or stopping
-            if history and history[0]["status"] in [
-                "ENGINE_STARTING",
-                "ENGINE_RUNNING",
-                "ENGINE_SCHEDULING",
-            ]:
-                # If run before and is currently running, starting, or scheduled to start
+            # state == "stopped"
+            if latest is not None and latest.status in ACTIVE_STATES:
+                if not isinstance(latest.id, str):
+                    self._fail("Job run ID is invalid from latest run.")
+                self.changed = True
                 if not self.module.check_mode:
-                    self.changed = True
-                    self.job_run = self.query(
-                        method="POST",
-                        api=[
-                            "projects",
-                            project["id"],
-                            "jobs",
-                            job["id"],
-                            "runs",
-                            history[0]["id"] + ":stop",
-                        ],
-                    )
-            elif history:
-                # Else is stopping or is stopped or other terminal state
-                self.job_run = history[0]
-            if self.wait:
-                # Wait for terminal condition
+                    self.job_run = client.stop_job_run(project_id, job_id, latest.id)
+                else:
+                    self.job_run = latest
+            elif latest is not None:
+                # Already stopped or in another terminal state.
+                self.job_run = latest
+
+            if self.wait and not self.module.check_mode:
                 self.job_run = self._wait_for_state(
-                    project["id"],
-                    job["id"],
+                    client,
+                    project_id,
+                    job_id,
                     ["ENGINE_STOPPED", "ENGINE_SUCCEEDED"],
                     [
                         "ENGINE_FAILED",
@@ -195,79 +411,22 @@ class MLProjectJobRun(MLModule):
                     ],
                 )
 
-    def _wait_for_state(
-        self,
-        project_id: str,
-        job_id: str,
-        success_status: list,
-        error_status: list,
-    ):
-        timeout = time.time() + self.timeout
-        while time.time() < timeout:
-            history = self._get_history(project_id, job_id)
-            if history:
-                if history[0]["status"] in success_status:
-                    return history[0]
-                elif history[0]["status"] in error_status:
-                    self.module.fail_json(
-                        msg="Failed to reach target status. Status: %s"
-                        % history[0]["status"],
-                    )
-                else:
-                    time.sleep(self.delay)
-        self.module.fail_json(
-            msg="Failed to reach target status. Status: module timeout",
-        )
-
-    def _get_history(self, project_id: str, job_id: str):
-        return self.query(
-            method="GET",
-            api=["projects", project_id, "jobs", job_id, "runs"],
-            params=dict(sort="-created_at"),
-            field="job_runs",
-        )
-
 
 def main():
-    module = MLProjectJobRun.ansible_module(
-        argument_spec=dict(
-            project_name=dict(required=False, type="str"),
-            project_id=dict(required=False, type="str"),
-            name=dict(required=False, type="str", aliases=["job"]),
-            id=dict(required=False, type="str", aliases=["job_id"]),
-            arguments=dict(required=False, type="str"),
-            env=dict(required=False, type="dict", aliases=["env_vars"]),
-            state=dict(
-                required=False,
-                type="str",
-                default="started",
-                choices=["started", "stopped"],
-            ),
-            wait=dict(required=False, type="bool", default=False),
-            delay=dict(required=False, type="int", default=15),
-            timeout=dict(required=False, type="int", default=3600),
-        ),
-        required_one_of=[
-            ["project_name", "project_id"],
-            ["name", "id"],
-        ],
-        supports_check_mode=True,
-    )
+    result = MlProjectJobRunModule()
 
-    result = MLProjectJobRun(module)
-
-    output = dict(
+    output: Dict[str, Any] = dict(
         changed=result.changed,
-        job_run=result.job_run,
+        job_run=to_dict(result.job_run) if result.job_run else {},
     )
 
-    if result.debug:
+    if result.debug_log:
         output.update(
             sdk_out=result.log_out,
             sdk_out_lines=result.log_lines,
         )
 
-    module.exit_json(**output)
+    result.module.exit_json(**output)
 
 
 if __name__ == "__main__":
