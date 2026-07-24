@@ -67,6 +67,7 @@ from ansible_collections.cloudera.services.plugins.module_utils.ml import (
     CmlServicesClient,
     MlProject,
     MlProjectClient,
+    MlJob,
     MlJobClient,
     MlModelClient,
     MlApplication,
@@ -1338,6 +1339,94 @@ def deletable_ml_application(
     purge_ml_application(existing_ml_project.id, application)
 
     yield application
+
+
+@pytest.fixture
+def purge_ml_job(
+    ml_job_client,
+) -> Generator[Callable[[str, MlJob], MlJob], None, None]:
+    """Factory fixture to register CML jobs for cleanup after the test."""
+    jobs: List[tuple] = []
+
+    def _add_job(project_id: str, job: MlJob) -> MlJob:
+        jobs.append((project_id, job))
+        return job
+
+    yield _add_job
+
+    # Clean up after the test
+    for project_id, job in jobs:
+        try:
+            if isinstance(job.id, str):
+                ml_job_client.delete_job(project_id, job.id)
+        except Exception as e:
+            log.info(f"Failed to delete job {job.id} during cleanup: {str(e)}")
+
+
+@pytest.fixture(scope="module")
+def existing_ml_job(
+    existing_ml_project,
+    ml_job_client,
+    ml_runtime_identifier,
+    ml_project_script,
+) -> Generator[MlJob, None, None]:
+    """Fixture to create a module-scoped CML job and clean it up afterwards."""
+    name = "existing-job"
+
+    # Clean up any existing test job with the same name
+    for job in ml_job_client.list_jobs(existing_ml_project.id):
+        if job.name == name and isinstance(job.id, str):
+            ml_job_client.delete_job(existing_ml_project.id, job.id)
+
+    job = ml_job_client.create_job(
+        existing_ml_project.id,
+        MlJob(
+            name=name,
+            script=ml_project_script,
+            runtime_identifier=ml_runtime_identifier,
+        ),
+    )
+
+    yield job
+
+    # Clean up after the test (module scope, cannot use purge_ml_job fixture)
+    try:
+        if isinstance(job.id, str):
+            ml_job_client.delete_job(existing_ml_project.id, job.id)
+    except Exception as e:
+        log.info(f"Failed to delete job {job.id} during cleanup: {str(e)}")
+
+
+@pytest.fixture()
+def deletable_ml_job(
+    request,
+    existing_ml_project,
+    ml_job_client,
+    ml_runtime_identifier,
+    ml_project_script,
+    purge_ml_job,
+) -> Generator[MlJob, None, None]:
+    """Fixture to create a function-scoped CML job and clean it up if needed."""
+    name = f"del-{request.node.name.lower()}"[:100]
+
+    # Clean up any existing test job with the same name
+    for job in ml_job_client.list_jobs(existing_ml_project.id):
+        if job.name == name and isinstance(job.id, str):
+            ml_job_client.delete_job(existing_ml_project.id, job.id)
+
+    job = ml_job_client.create_job(
+        existing_ml_project.id,
+        MlJob(
+            name=name,
+            script=ml_project_script,
+            runtime_identifier=ml_runtime_identifier,
+        ),
+    )
+
+    # Register for deletion after test
+    purge_ml_job(existing_ml_project.id, job)
+
+    yield job
 
 
 @pytest.fixture(scope="module")

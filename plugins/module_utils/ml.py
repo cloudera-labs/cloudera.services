@@ -20,7 +20,7 @@ Service-model layer for the Cloudera Machine Learning (CML) Workspace API v2.
 See https://docs.cloudera.com/machine-learning/cloud/api/topics/ml-api-v2.html
 
 This module uses typed dataclass models plus stateless ``*Client`` classes that
-operate against a ``ServicesClient``. CML authenticates with a bearer token 
+operate against a ``ServicesClient``. CML authenticates with a bearer token
 (``api_key``), so this module also provides:
 
 - ``CmlServicesClient`` - an ``AnsibleServicesClient`` subclass that injects the
@@ -209,14 +209,22 @@ class MlJob:
     id: Union[str, None, NULLABLE] = NULLABLE
     project_id: Union[str, None, NULLABLE] = NULLABLE
     script: Union[str, None, NULLABLE] = NULLABLE
+    arguments: Union[str, None, NULLABLE] = NULLABLE
     kernel: Union[str, None, NULLABLE] = NULLABLE
     cpu: Union[float, None, NULLABLE] = NULLABLE
     memory: Union[float, None, NULLABLE] = NULLABLE
     nvidia_gpu: Union[int, None, NULLABLE] = NULLABLE
     runtime_identifier: Union[str, None, NULLABLE] = NULLABLE
+    runtime_addon_identifiers: Union[List[str], None, NULLABLE] = NULLABLE
+    attachments: Union[List[str], None, NULLABLE] = NULLABLE
     schedule: Union[str, None, NULLABLE] = NULLABLE
     parent_job_id: Union[str, None, NULLABLE] = NULLABLE
+    timeout: Union[int, None, NULLABLE] = NULLABLE
+    kill_on_timeout: Union[bool, None, NULLABLE] = NULLABLE
+    paused: Union[bool, None, NULLABLE] = NULLABLE
+    recipients: Union[List[Dict[str, Any]], None, NULLABLE] = NULLABLE
     environment: Union[Dict[str, Any], str, None, NULLABLE] = NULLABLE
+    creator: Union[Dict[str, Any], None, NULLABLE] = NULLABLE
     created_at: Union[str, None, NULLABLE] = NULLABLE
     updated_at: Union[str, None, NULLABLE] = NULLABLE
 
@@ -499,8 +507,7 @@ class MlModelDeploymentClient:
     ) -> List[MlModelDeployment]:
         resp = self._list_deployments(project_id, model_id, build_id)
         return [
-            from_dict(MlModelDeployment, d)
-            for d in resp.get("model_deployments", [])
+            from_dict(MlModelDeployment, d) for d in resp.get("model_deployments", [])
         ]
 
     def describe_deployment(

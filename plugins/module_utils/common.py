@@ -393,7 +393,9 @@ def paginated(
         Decorator function
     """
 
-    candidate_keys = [next_key] if next_key is not None else ["nextPageToken", "nextToken"]
+    candidate_keys = (
+        [next_key] if next_key is not None else ["nextPageToken", "nextToken"]
+    )
 
     def decorator(func):
         @functools.wraps(func)
