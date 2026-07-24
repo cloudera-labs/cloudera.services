@@ -430,7 +430,12 @@ class MlModelBuild:
     status: Union[str, None, NULLABLE] = NULLABLE
     file_path: Union[str, None, NULLABLE] = NULLABLE
     function_name: Union[str, None, NULLABLE] = NULLABLE
+    kernel: Union[str, None, NULLABLE] = NULLABLE
     runtime_identifier: Union[str, None, NULLABLE] = NULLABLE
+    runtime_addon_identifiers: Union[List[str], None, NULLABLE] = NULLABLE
+    comment: Union[str, None, NULLABLE] = NULLABLE
+    crn: Union[str, None, NULLABLE] = NULLABLE
+    creator: Union[Dict[str, Any], None, NULLABLE] = NULLABLE
     created_at: Union[str, None, NULLABLE] = NULLABLE
     updated_at: Union[str, None, NULLABLE] = NULLABLE
 
@@ -477,6 +482,25 @@ class MlModelBuildClient:
                 f"/{API_VERSION}/projects/{project_id}/models/{model_id}/builds/{build_id}",
                 squelch={403: None, 404: None},
             ),
+        )
+
+    def create_build(
+        self,
+        project_id: str,
+        model_id: str,
+        build: MlModelBuild,
+    ) -> MlModelBuild:
+        return from_dict(
+            MlModelBuild,
+            self.api_client.post(
+                f"/{API_VERSION}/projects/{project_id}/models/{model_id}/builds",
+                data=to_dict(build),
+            ),
+        )
+
+    def delete_build(self, project_id: str, model_id: str, build_id: str) -> None:
+        self.api_client.delete(
+            f"/{API_VERSION}/projects/{project_id}/models/{model_id}/builds/{build_id}",
         )
 
 

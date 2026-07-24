@@ -72,6 +72,8 @@ from ansible_collections.cloudera.services.plugins.module_utils.ml import (
     MlJobRunClient,
     MlModel,
     MlModelClient,
+    MlModelBuild,
+    MlModelBuildClient,
     MlApplication,
     MlApplicationClient,
     MlFile,
@@ -1127,6 +1129,12 @@ def ml_model_client(ml_rest_client) -> MlModelClient:
 
 
 @pytest.fixture(scope="module")
+def ml_model_build_client(ml_rest_client) -> MlModelBuildClient:
+    """Fixture to create an MlModelBuildClient instance."""
+    return MlModelBuildClient(api_client=ml_rest_client)
+
+
+@pytest.fixture(scope="module")
 def ml_application_client(ml_rest_client) -> MlApplicationClient:
     """Fixture to create an MlApplicationClient instance."""
     return MlApplicationClient(api_client=ml_rest_client)
@@ -1517,6 +1525,89 @@ def deletable_ml_model(
     purge_ml_model(existing_ml_project.id, model)
 
     yield model
+
+
+@pytest.fixture
+def purge_ml_model_build(
+    ml_model_build_client,
+) -> Generator[Callable[[str, str, MlModelBuild], MlModelBuild], None, None]:
+    """Factory fixture to register CML model builds for cleanup after the test."""
+    builds: List[tuple] = []
+
+    def _add_build(project_id: str, model_id: str, build: MlModelBuild) -> MlModelBuild:
+        builds.append((project_id, model_id, build))
+        return build
+
+    yield _add_build
+
+    # Clean up after the test
+    for project_id, model_id, build in builds:
+        try:
+            if isinstance(build.id, str):
+                ml_model_build_client.delete_build(project_id, model_id, build.id)
+        except Exception as e:
+            log.info(f"Failed to delete build {build.id} during cleanup: {str(e)}")
+
+
+@pytest.fixture(scope="module")
+def existing_ml_model_build(
+    existing_ml_project,
+    existing_ml_model,
+    ml_model_build_client,
+    ml_runtime_identifier,
+    ml_project_script,
+) -> Generator[MlModelBuild, None, None]:
+    """Fixture to create a module-scoped CML model build and clean it up afterwards."""
+    build = ml_model_build_client.create_build(
+        existing_ml_project.id,
+        existing_ml_model.id,
+        MlModelBuild(
+            file_path=ml_project_script,
+            function_name="predict",
+            runtime_identifier=ml_runtime_identifier,
+            comment="existing-build",
+        ),
+    )
+
+    yield build
+
+    # Clean up after the test (module scope, cannot use purge_ml_model_build fixture)
+    try:
+        if isinstance(build.id, str):
+            ml_model_build_client.delete_build(
+                existing_ml_project.id,
+                existing_ml_model.id,
+                build.id,
+            )
+    except Exception as e:
+        log.info(f"Failed to delete build {build.id} during cleanup: {str(e)}")
+
+
+@pytest.fixture()
+def deletable_ml_model_build(
+    existing_ml_project,
+    existing_ml_model,
+    ml_model_build_client,
+    ml_runtime_identifier,
+    ml_project_script,
+    purge_ml_model_build,
+) -> Generator[MlModelBuild, None, None]:
+    """Fixture to create a function-scoped CML model build and clean it up if needed."""
+    build = ml_model_build_client.create_build(
+        existing_ml_project.id,
+        existing_ml_model.id,
+        MlModelBuild(
+            file_path=ml_project_script,
+            function_name="predict",
+            runtime_identifier=ml_runtime_identifier,
+            comment="deletable-build",
+        ),
+    )
+
+    # Register for deletion after test
+    purge_ml_model_build(existing_ml_project.id, existing_ml_model.id, build)
+
+    yield build
 
 
 @pytest.fixture(scope="module")
