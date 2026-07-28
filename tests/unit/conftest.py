@@ -39,11 +39,6 @@ from ansible.module_utils.common.text.converters import to_bytes
 from ansible_collections.cloudera.services.plugins.module_utils.common import (
     AnsibleServicesClient,
 )
-from ansible_collections.cloudera.services.plugins.module_utils.ranger import (
-    RangerPolicy,
-    RangerPolicyClient,
-    RangerPolicyResource,
-)
 from ansible_collections.cloudera.services.plugins.module_utils.ssb import (
     SsbDataSource,
     SsbDataSourceClient,
@@ -279,7 +274,7 @@ def smm_kafka_topic(
         "sasl_plain_username": env_context["SMM_KAFKA_USERNAME"],
         "sasl_plain_password": env_context["SMM_KAFKA_PASSWORD"],
         "ssl_cafile": env_context["SMM_KAFKA_SSL_CAFILE"],
-        "api_version_auto_timeout_ms": 30000,
+        # "api_version_auto_timeout_ms": 30000,
     }
 
     admin_client = KafkaAdminClient(
@@ -377,14 +372,14 @@ def ssb_rest_client(request) -> AnsibleServicesClient:
 
 
 @pytest.fixture(scope="module")
-def project_client(ssb_rest_client) -> SsbProjectClient:
+def ssb_project_client(ssb_rest_client) -> SsbProjectClient:
     """Fixture to create an SSBProjectClient instance."""
     return SsbProjectClient(api_client=ssb_rest_client)
 
 
 @pytest.fixture
 def purge_project(
-    project_client,
+    ssb_project_client,
 ) -> Generator[Callable[[SsbProject], SsbProject], None, None]:
     """Fixture to purge a test project after the test."""
     projects = []
@@ -398,24 +393,24 @@ def purge_project(
     # Clean up after the test
     for project in projects:
         try:
-            project_client.delete_project(project)
+            ssb_project_client.delete_project(project)
         except Exception as e:
             log.info(f"Failed to delete project {project.id} during cleanup: {str(e)}")
 
 
 @pytest.fixture(scope="module")
-def existing_project(request, project_client) -> Generator[SsbProject, None, None]:
+def existing_project(request, ssb_project_client) -> Generator[SsbProject, None, None]:
     """Fixture to create a module-scoped test project and clean it up after the test."""
     project_name = request.node.name.lower().rstrip(".py")
 
     # Clean up any existing test project
-    projects = project_client.list_projects()
+    projects = ssb_project_client.list_projects()
     for project in projects:
         if project.name == project_name:
-            project_client.delete_project(project)
+            ssb_project_client.delete_project(project)
 
     # Create the test project
-    project = project_client.create_project(
+    project = ssb_project_client.create_project(
         SsbProject(
             name=project_name,
             description="Existing project created by pytest",
@@ -426,7 +421,7 @@ def existing_project(request, project_client) -> Generator[SsbProject, None, Non
 
     # Clean up after the test (module scope, cannot use purge_project fixture)
     try:
-        project_client.delete_project(project)
+        ssb_project_client.delete_project(project)
     except Exception as e:
         log.info(f"Failed to delete project {project.id} during cleanup: {str(e)}")
 
@@ -434,20 +429,20 @@ def existing_project(request, project_client) -> Generator[SsbProject, None, Non
 @pytest.fixture()
 def deletable_project(
     request,
-    project_client,
+    ssb_project_client,
     purge_project,
 ) -> Generator[SsbProject, None, None]:
     """Fixture to create a function-scoped test project and clean it up after the test if needed."""
     project_name = request.node.name.lower().rstrip(".py")
 
     # Clean up any existing test project
-    projects = project_client.list_projects()
+    projects = ssb_project_client.list_projects()
     for project in projects:
         if project.name == project_name:
-            project_client.delete_project(project)
+            ssb_project_client.delete_project(project)
 
     # Create the test project
-    project = project_client.create_project(
+    project = ssb_project_client.create_project(
         SsbProject(
             name=project_name,
             description="Deletable project created by pytest",
@@ -746,13 +741,15 @@ def set_keytab(user_keytab_client, env_context) -> Generator[None, None, None]:
 
 
 @pytest.fixture(scope="module")
-def table_client(ssb_rest_client) -> SsbTableClient:
+def ssb_table_client(ssb_rest_client) -> SsbTableClient:
     """Fixture to create an SSBTableClient instance."""
     return SsbTableClient(api_client=ssb_rest_client)
 
 
 @pytest.fixture
-def purge_table(table_client) -> Generator[Callable[[SsbTable], SsbTable], None, None]:
+def purge_table(
+    ssb_table_client,
+) -> Generator[Callable[[SsbTable], SsbTable], None, None]:
     """Fixture to purge a test job after the test."""
     tables: List[SsbTable] = []
 
@@ -768,7 +765,7 @@ def purge_table(table_client) -> Generator[Callable[[SsbTable], SsbTable], None,
     # Clean up after the test
     for table in tables:
         try:
-            table_client.delete_table(table.project_id, table.id)
+            ssb_table_client.delete_table(table.project_id, table.id)
         except Exception as e:
             log.info(f"Failed to delete table {table.id} during cleanup: {str(e)}")
 
@@ -776,7 +773,7 @@ def purge_table(table_client) -> Generator[Callable[[SsbTable], SsbTable], None,
 @pytest.fixture
 def existing_table_kafka(
     request,
-    table_client,
+    ssb_table_client,
     existing_project,
     purge_table,
     existing_data_source_kafka,
@@ -787,18 +784,18 @@ def existing_table_kafka(
     table_name = request.node.name.lower()
 
     # Clean up any existing test tables with the same name
-    tables = table_client.list_tables(existing_project.id)
+    tables = ssb_table_client.list_tables(existing_project.id)
     for table in tables:
-        if table.name == table_name:
-            table_client.delete_table(table.project_id, table.id)
+        if table.table_name == table_name:
+            ssb_table_client.delete_table(table.project_id, table.id)
 
-    table = table_client.create_table(
+    table = ssb_table_client.create_table(
         project_id=existing_project.id,
         table=SsbTable(
             table_name=table_name,
             type="kafka",
             metadata={
-                "endpoint": existing_data_source_kafka.id,
+                "kafka_source_name": existing_data_source_kafka.name,
                 "format": "JSON",
                 "schema": json.dumps(existing_data_source_kafka_schema),
                 "topic": table_name,
@@ -947,129 +944,6 @@ def activated_deletable_environment(
 
 
 # ---------------------------------------------------------------------------
-# Ranger Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(scope="module")
-def ranger_rest_client(request) -> AnsibleServicesClient:
-    """
-    Fixture to create an AnsibleServicesClient instance for Ranger Admin.
-
-    It checks for the following required environment variables set at the module
-    and skips tests if any are missing:
-    - RANGER_ADMIN_URL
-    - RANGER_ADMIN_USERNAME
-    - RANGER_ADMIN_PASSWORD
-    """
-    required_vars = getattr(request.module, "REQUIRED_ENV_VARS", [])
-    missing = [var for var in required_vars if var not in os.environ]
-    if missing:
-        pytest.skip(f"Missing env vars: {', '.join(missing)}")
-
-    module = Mock()
-    module.params = {}
-    module.fail_json = Mock(
-        side_effect=AnsibleFailJson({"msg": "fail_json called"}),
-    )
-    module.exit_json = Mock(
-        side_effect=AnsibleExitJson({"msg": "exit_json called"}),
-    )
-
-    module.params.update(
-        {
-            "url": os.environ["RANGER_ADMIN_URL"],
-            "url_username": os.environ["RANGER_ADMIN_USERNAME"],
-            "url_password": os.environ["RANGER_ADMIN_PASSWORD"],
-            "validate_certs": os.environ.get("RANGER_VALIDATE_CERTS", "false").lower()
-            == "true",
-            "force_basic_auth": True,
-        },
-    )
-
-    # Create the AnsibleServicesClient instance
-    return AnsibleServicesClient(
-        module=module,
-        cookies=CookieJar(),
-    )
-
-
-@pytest.fixture(scope="module")
-def policy_client(ranger_rest_client) -> RangerPolicyClient:
-    """Fixture to create a RangerPolicyClient instance."""
-    return RangerPolicyClient(api_client=ranger_rest_client)
-
-
-@pytest.fixture(scope="session")
-def test_service():
-    """Provide the name of a test Ranger service."""
-    # Use an environment variable or default to a common service name
-    return os.environ.get("RANGER_TEST_SERVICE", "cm_hdfs")
-
-
-@pytest.fixture(scope="module")
-def existing_policy(policy_client, test_service):
-    """Get an existing policy from the Ranger Admin for read-only tests."""
-    policies = policy_client.list_policies(service_name=test_service)
-
-    if not policies:
-        pytest.skip(
-            f"No existing policies found in service '{test_service}'. "
-            "Cannot run tests that require an existing policy.",
-        )
-
-    # Return the first policy found
-    return policies[0]
-
-
-@pytest.fixture
-def deletable_policy(policy_client, test_service, purge_policy):
-    """Create a policy that can be deleted/modified in tests."""
-    policy = RangerPolicy(
-        name=f"ansible-test-deletable-{os.getpid()}",
-        service=test_service,
-        description="Temporary policy for testing - safe to delete",
-        resources={
-            "path": RangerPolicyResource(
-                values=[f"/tmp/ansible-test-{os.getpid()}"],
-                is_excludes=False,
-                is_recursive=False,
-            ),
-        },
-    )
-
-    created = policy_client.create_policy(policy)
-
-    # Register for deletion after test
-    purge_policy(created)
-
-    yield created
-
-
-@pytest.fixture
-def purge_policy(
-    policy_client,
-) -> Generator[Callable[[RangerPolicy], RangerPolicy], None, None]:
-    """Factory fixture to register policies for cleanup."""
-    policies_to_delete = []
-
-    def _register(policy: RangerPolicy) -> RangerPolicy:
-        """Register a policy for cleanup."""
-        if policy and hasattr(policy, "id") and policy.id:
-            policies_to_delete.append(policy.id)
-        return policy
-
-    yield _register
-
-    # Cleanup: Delete all registered policies
-    for policy_id in policies_to_delete:
-        try:
-            policy_client.delete_policy_by_id(policy_id)
-        except Exception as e:
-            log.info(f"Failed to delete policy {policy_id} during cleanup: {str(e)}")
-
-
-# ---------------------------------------------------------------------------
 # Cloudera Machine Learning (CML) Fixtures
 # ---------------------------------------------------------------------------
 
@@ -1168,7 +1042,9 @@ def purge_ml_runtime_repo(
             if isinstance(repo.id, int):
                 ml_runtime_repo_client.delete_runtime_repo(repo.id)
         except Exception as e:
-            log.info(f"Failed to delete runtime repo {repo.id} during cleanup: {str(e)}")
+            log.info(
+                f"Failed to delete runtime repo {repo.id} during cleanup: {str(e)}",
+            )
 
 
 @pytest.fixture(scope="module")
@@ -1849,7 +1725,11 @@ def built_ml_model_build(
 @pytest.fixture
 def purge_ml_model_deployment(
     ml_model_deployment_client,
-) -> Generator[Callable[[str, str, str, MlModelDeployment], MlModelDeployment], None, None]:
+) -> Generator[
+    Callable[[str, str, str, MlModelDeployment], MlModelDeployment],
+    None,
+    None,
+]:
     """Factory fixture to register CML model deployments for cleanup after the test."""
     deployments: List[tuple] = []
 
