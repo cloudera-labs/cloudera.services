@@ -137,12 +137,12 @@ FROM {job_name}_src;
     yield job
 
 
-@pytest.fixture
+@pytest.fixture()
 def running_streaming_job(
     job_client,
     existing_streaming_job,
 ) -> Generator[SsbJob, None, None]:
-    """Fixture to ensure the existing streaming job is running."""
+    """Fixture to ensure the existing streaming job is running. (Requires an active keytab.)"""
     # Start the job if it's not already running
     job_state = job_client.get_job_state(
         project_id=existing_streaming_job.project_id,
@@ -426,19 +426,21 @@ def test_delete_job_nonexistent(job_client, ansible_module, ssb_rest_client):
     )
 
 
-def test_stop_job(job_client, ansible_module, ssb_rest_client, existing_streaming_job):
+@pytest.mark.usefixtures("set_keytab")
+def test_stop_job(job_client, ansible_module, ssb_rest_client, running_streaming_job):
     """Test stopping a Job."""
     ssb_rest_client.module = ansible_module
 
     response = job_client.stop_job(
-        project_id=existing_streaming_job.project_id,
-        job_id=existing_streaming_job.job_id,
+        project_id=running_streaming_job.project_id,
+        job_id=running_streaming_job.job_id,
         config=SsbJobStop(),
     )
 
     assert response is None
 
 
+@pytest.mark.usefixtures("set_keytab")
 def test_stop_job_with_savepoint(
     job_client,
     ansible_module,
@@ -509,6 +511,7 @@ def test_stop_job_nonexistent_project(job_client, ansible_module, ssb_rest_clien
     )
 
 
+@pytest.mark.usefixtures("set_keytab")
 def test_start_job_minimal(
     job_client,
     ansible_module,
@@ -538,6 +541,7 @@ def test_start_job_minimal(
     assert all(isinstance(item, SsbJobResponse) for item in response)
 
 
+@pytest.mark.usefixtures("set_keytab")
 def test_start_job_with_config(
     job_client,
     ansible_module,
@@ -594,13 +598,14 @@ def test_start_job_nonexistent_project(job_client, ansible_module, ssb_rest_clie
     )
 
 
+@pytest.mark.usefixtures("set_keytab")
 def test_start_job_nonexistent_job(
     job_client,
     ansible_module,
     ssb_rest_client,
     existing_project,
 ):
-    """Test starting a Job in a nonexistent project raises an exception."""
+    """Test starting a Job in a nonexistent job raises an exception."""
     ssb_rest_client.module = ansible_module
     ssb_rest_client.module.fail_json = Mock(
         side_effect=AnsibleFailJson({"msg": "Job not found"}),

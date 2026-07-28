@@ -161,7 +161,7 @@ class SsbUserModule(ServicesModule):
 
         # Initialize result variables
         self.changed = False
-        self.diff = {}
+        self.diff = {"before": {}, "after": {}}
         self.user: Optional[SsbUser] = None
 
     def process(self) -> None:
@@ -178,10 +178,8 @@ class SsbUserModule(ServicesModule):
             changes_made = True
 
             if self.module._diff:
-                self.diff["project_id"] = {
-                    "before": existing.project_id,
-                    "after": self.project_id,
-                }
+                self.diff["before"].update({"project_id": existing.project_id})
+                self.diff["after"].update({"project_id": self.project_id})
 
             if not self.module.check_mode:
                 existing = client.set_current_user_project(self.project_id)
@@ -191,10 +189,8 @@ class SsbUserModule(ServicesModule):
             changes_made = True
 
             if self.module._diff:
-                self.diff["password"] = {
-                    "before": "***",
-                    "after": "***",
-                }
+                self.diff["before"].update({"password": "***"})
+                self.diff["after"].update({"password": "***"})
 
             if not self.module.check_mode:
                 existing = client.set_current_user_password(
@@ -212,6 +208,11 @@ def main():
     output: Dict[str, Any] = dict(
         changed=result.changed,
         user=to_dict(result.user) if result.user else {},
+        diff=(
+            result.diff
+            if result.diff["before"] or result.diff["after"]
+            else {"before": "", "after": ""}
+        ),
     )
 
     if result.diff:

@@ -66,7 +66,7 @@ def ansible_module(env_context) -> Mock:
 
 def test_create_table_kafka(
     request,
-    table_client,
+    ssb_table_client,
     ansible_module,
     ssb_rest_client,
     existing_data_source_kafka,
@@ -79,13 +79,13 @@ def test_create_table_kafka(
     table_name = request.node.name.lower()
 
     # Create the test data source
-    table = table_client.create_table(
+    table = ssb_table_client.create_table(
         project_id=existing_data_source_kafka.project_id,
         table=SsbTable(
             table_name=table_name,
             type="kafka",
             metadata={
-                "endpoint": existing_data_source_kafka.id,
+                "kafka_source_name": existing_data_source_kafka.name,
                 "format": "JSON",
                 "schema": json.dumps(existing_data_source_kafka_schema),
                 "topic": table_name,
@@ -101,7 +101,7 @@ def test_create_table_kafka(
 
 
 def test_describe_table_kafka(
-    table_client,
+    ssb_table_client,
     ansible_module,
     ssb_rest_client,
     existing_table_kafka,
@@ -109,7 +109,7 @@ def test_describe_table_kafka(
     """Test describing a Kafka Table"""
     ssb_rest_client.module = ansible_module
 
-    table = table_client.describe_table(
+    table = ssb_table_client.describe_table(
         project_id=existing_table_kafka.project_id,
         table_id=existing_table_kafka.id,
     )
@@ -120,7 +120,7 @@ def test_describe_table_kafka(
 
 
 def test_describe_table_nonexistent(
-    table_client,
+    ssb_table_client,
     ansible_module,
     ssb_rest_client,
     existing_project,
@@ -128,7 +128,7 @@ def test_describe_table_nonexistent(
     """Test describing a non-existent Table"""
     ssb_rest_client.module = ansible_module
 
-    table = table_client.describe_table(
+    table = ssb_table_client.describe_table(
         project_id=existing_project.id,
         table_id=1234,
     )
@@ -137,14 +137,14 @@ def test_describe_table_nonexistent(
 
 
 def test_describe_table_nonexistent_project(
-    table_client,
+    ssb_table_client,
     ansible_module,
     ssb_rest_client,
 ):
     """Test describing a Table with a non-existent project"""
     ssb_rest_client.module = ansible_module
 
-    table = table_client.describe_table(
+    table = ssb_table_client.describe_table(
         project_id="nonexistent-project-id-12345",
         table_id=1234,
     )
@@ -153,7 +153,7 @@ def test_describe_table_nonexistent_project(
 
 
 def test_list_tables(
-    table_client,
+    ssb_table_client,
     ansible_module,
     ssb_rest_client,
     existing_table_kafka,
@@ -161,7 +161,7 @@ def test_list_tables(
     """Test listing Tables"""
     ssb_rest_client.module = ansible_module
 
-    tables = table_client.list_tables(project_id=existing_table_kafka.project_id)
+    tables = ssb_table_client.list_tables(project_id=existing_table_kafka.project_id)
 
     assert isinstance(tables, list)
     assert len(tables) == 1
@@ -170,7 +170,7 @@ def test_list_tables(
 
 
 def test_list_tables_nonexistent_project(
-    table_client,
+    ssb_table_client,
     ansible_module,
     ssb_rest_client,
 ):
@@ -181,7 +181,7 @@ def test_list_tables_nonexistent_project(
     )
 
     with pytest.raises(AnsibleFailJson):
-        table_client.list_tables(project_id="nonexistent-project-id-12345")
+        ssb_table_client.list_tables(project_id="nonexistent-project-id-12345")
 
     call_args = ssb_rest_client.module.fail_json.call_args
     assert call_args is not None
@@ -193,7 +193,7 @@ def test_list_tables_nonexistent_project(
 
 
 def test_delete_table(
-    table_client,
+    ssb_table_client,
     ansible_module,
     ssb_rest_client,
     existing_table_kafka,
@@ -202,13 +202,13 @@ def test_delete_table(
     ssb_rest_client.module = ansible_module
 
     # Delete the table
-    table_client.delete_table(
+    ssb_table_client.delete_table(
         project_id=existing_table_kafka.project_id,
         table_id=existing_table_kafka.id,
     )
 
     # Verify the table no longer exists
-    table = table_client.describe_table(
+    table = ssb_table_client.describe_table(
         project_id=existing_table_kafka.project_id,
         table_id=existing_table_kafka.id,
     )
@@ -217,7 +217,7 @@ def test_delete_table(
 
 
 def test_delete_table_nonexistent_project(
-    table_client,
+    ssb_table_client,
     ansible_module,
     ssb_rest_client,
 ):
@@ -228,7 +228,7 @@ def test_delete_table_nonexistent_project(
     )
 
     with pytest.raises(AnsibleFailJson):
-        table_client.delete_table(
+        ssb_table_client.delete_table(
             project_id="nonexistent-project-id-12345",
             table_id=12345,
         )

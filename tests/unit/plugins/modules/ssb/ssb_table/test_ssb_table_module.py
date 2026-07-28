@@ -131,6 +131,7 @@ def test_ssb_table_module_present_idempotent(module_args, mocker):
         table_name="existing_table",
         type="TABLE",
         metadata={"columns": []},
+        transform_code_b64_encoded=False,
     )
 
     mock_list_tables = mocker.patch(
@@ -165,6 +166,7 @@ def test_ssb_table_module_by_id(module_args, mocker):
         table_name="existing_table",
         type="TABLE",
         metadata={},
+        transform_code_b64_encoded=False,
     )
 
     mock_describe_table = mocker.patch(
@@ -508,6 +510,7 @@ def test_ssb_table_module_update_with_update_disabled(module_args, mocker):
                 {"name": "id", "type": "INT"},
             ],
         },
+        transform_code_b64_encoded=False,
     )
 
     mock_list_tables = mocker.patch(
@@ -521,7 +524,7 @@ def test_ssb_table_module_update_with_update_disabled(module_args, mocker):
         "ansible_collections.cloudera.services.plugins.modules.ssb_table.SsbTableClient.create_table",
     )
     mock_warn = mocker.patch(
-        "ansible_collections.cloudera.services.plugins.modules.ssb_table.SsbTableModule.module.warn",
+        "ansible.module_utils.basic.AnsibleModule.warn",
     )
 
     module_args(
@@ -565,6 +568,7 @@ def test_ssb_table_module_update_check_mode_with_update_enabled(module_args, moc
                 {"name": "id", "type": "INT"},
             ],
         },
+        transform_code_b64_encoded=False,
     )
 
     mock_list_tables = mocker.patch(
@@ -619,6 +623,7 @@ def test_ssb_table_module_no_update_needed(module_args, mocker):
                 {"name": "name", "type": "STRING"},
             ],
         },
+        transform_code_b64_encoded=False,
     )
 
     mock_list_tables = mocker.patch(

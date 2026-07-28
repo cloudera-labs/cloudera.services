@@ -269,8 +269,8 @@ def test_ssb_user_module_diff_mode_set_project(module_args, mocker):
     result = e.value
     assert result["changed"] is True
     assert "diff" in result
-    assert result["diff"]["project_id"]["before"] == "old-project"
-    assert result["diff"]["project_id"]["after"] == "new-project"
+    assert result["diff"]["before"]["project_id"] == "old-project"
+    assert result["diff"]["after"]["project_id"] == "new-project"
 
     mock_get_current_user.assert_called_once()
     mock_set_project.assert_called_once_with("new-project")
@@ -309,8 +309,8 @@ def test_ssb_user_module_diff_mode_change_password(module_args, mocker):
     result = e.value
     assert result["changed"] is True
     assert "diff" in result
-    assert result["diff"]["password"]["before"] == "***"
-    assert result["diff"]["password"]["after"] == "***"
+    assert result["diff"]["before"]["password"] == "***"
+    assert result["diff"]["after"]["password"] == "***"
 
     mock_get_current_user.assert_called_once()
     mock_set_password.assert_called_once_with("old-password", "new-password")

@@ -493,7 +493,7 @@ def test_activate_environment(
     ssb_rest_client,
     existing_project,
     existing_environment,
-    project_client,
+    ssb_project_client,
     deactivate_environment,
 ):
     """Test activating an Environment"""
@@ -505,7 +505,7 @@ def test_activate_environment(
     )
 
     # Verify the environment is activated
-    project = project_client.describe_project(existing_project.id)
+    project = ssb_project_client.describe_project(existing_project.id)
     assert project.active_environment == existing_environment.id
 
 
@@ -515,7 +515,7 @@ def test_activate_environment_already_active(
     ssb_rest_client,
     existing_project,
     active_environment,
-    project_client,
+    ssb_project_client,
 ):
     """Test activating an Environment that is already active"""
     ssb_rest_client.module = ansible_module
@@ -527,7 +527,7 @@ def test_activate_environment_already_active(
     )
 
     # Verify no errors occurred and the environment is still active
-    project = project_client.describe_project(existing_project.id)
+    project = ssb_project_client.describe_project(existing_project.id)
 
     assert project.active_environment == active_environment.id
 
@@ -592,7 +592,7 @@ def test_deactivate_environment(
     ssb_rest_client,
     existing_project,
     active_environment,
-    project_client,
+    ssb_project_client,
 ):
     """Test deactivating an Environment"""
     ssb_rest_client.module = ansible_module
@@ -602,7 +602,7 @@ def test_deactivate_environment(
     )
 
     # Verify the environment is deactivated
-    project = project_client.describe_project(existing_project.id)
+    project = ssb_project_client.describe_project(existing_project.id)
     assert project.active_environment is NULLABLE
 
 
@@ -611,7 +611,7 @@ def test_deactivate_environment_not_active(
     ansible_module,
     ssb_rest_client,
     existing_project,
-    project_client,
+    ssb_project_client,
 ):
     """Test deactivating an Environment when no Environment is active"""
     ssb_rest_client.module = ansible_module
@@ -622,7 +622,7 @@ def test_deactivate_environment_not_active(
     )
 
     # Verify no errors occurred and no environment is active
-    project = project_client.describe_project(existing_project.id)
+    project = ssb_project_client.describe_project(existing_project.id)
     assert project.active_environment is NULLABLE
 
 

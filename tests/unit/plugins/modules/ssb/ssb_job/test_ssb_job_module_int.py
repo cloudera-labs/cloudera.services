@@ -508,7 +508,7 @@ def test_ssb_job_diff_mode_create(request, ssb_module_args, purge_job):
 
     assert result["changed"] is True
     assert "diff" in result
-    assert result["diff"]["before"] is None
+    assert result["diff"]["before"] == {}
     assert result["diff"]["after"]["name"] == job_name
     assert result["diff"]["after"]["sql"] == "SELECT 1"
 

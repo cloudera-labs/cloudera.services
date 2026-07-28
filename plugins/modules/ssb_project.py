@@ -302,7 +302,7 @@ class SsbProjectModule(ServicesModule):
 
         # Initialize result variables
         self.changed = False
-        self.diff = {}
+        self.diff = {"before": "", "after": ""}
         self.project: Optional[SsbProject] = None
 
     def process(self) -> None:
@@ -324,7 +324,7 @@ class SsbProjectModule(ServicesModule):
                 if self.module._diff:
                     self.diff = {
                         "before": to_dict(existing),
-                        "after": None,
+                        "after": "",
                     }
 
                 if not self.module.check_mode:
@@ -351,7 +351,7 @@ class SsbProjectModule(ServicesModule):
 
                 if self.module._diff:
                     self.diff = {
-                        "before": None,
+                        "before": "",
                         "after": to_dict(incoming),
                     }
 
@@ -416,6 +416,7 @@ def main():
     output: Dict[str, Any] = dict(
         changed=result.changed,
         project=to_dict(result.project) if result.project else {},
+        diff=result.diff,
     )
 
     if result.debug_log:

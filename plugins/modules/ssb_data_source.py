@@ -235,7 +235,7 @@ class SsbDataSourceModule(ServicesModule):
 
         # Initialize result variables
         self.changed = False
-        self.diff = {}
+        self.diff = {"before": "", "after": ""}
         self.data_source: Optional[SsbDataSource] = None
 
     def process(self) -> None:
@@ -261,7 +261,7 @@ class SsbDataSourceModule(ServicesModule):
                 if self.module._diff:
                     self.diff = {
                         "before": to_dict(existing),
-                        "after": None,
+                        "after": "",
                     }
 
                 if not self.module.check_mode:
@@ -297,7 +297,7 @@ class SsbDataSourceModule(ServicesModule):
 
                 if self.module._diff:
                     self.diff = {
-                        "before": None,
+                        "before": "",
                         "after": to_dict(incoming),
                     }
 
@@ -364,6 +364,7 @@ def main():
     output: Dict[str, Any] = dict(
         changed=result.changed,
         data_source=to_dict(result.data_source) if result.data_source else {},
+        diff=result.diff,
     )
 
     if result.debug_log:

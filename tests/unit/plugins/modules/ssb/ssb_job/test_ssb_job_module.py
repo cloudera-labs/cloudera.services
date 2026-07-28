@@ -987,9 +987,12 @@ def test_ssb_job_diff_mode_create(module_args, mocker):
     result = e.value
     assert result["changed"] is True
     assert "diff" in result
-    assert result["diff"]["before"] is None
+    assert result["diff"]["before"] == {}
     assert result["diff"]["after"]["name"] == "test_job"
     assert result["diff"]["after"]["sql"] == "SELECT * FROM orders"
+
+    mock_list_jobs.assert_called_once_with(PROJECT_ID)
+    mock_create_job.assert_called_once()
 
 
 def test_ssb_job_diff_mode_update(module_args, mocker):
@@ -1086,7 +1089,7 @@ def test_ssb_job_diff_mode_state_change(module_args, mocker):
     assert result["diff"]["after"]["state"] == "RUNNING"
 
 
-def test_ssb_job_missing_name_and_id(module_args, mocker):
+def test_ssb_job_missing_name_and_id(module_args):
     """Test that missing both name and job_id fails."""
     module_args(
         {
@@ -1103,7 +1106,7 @@ def test_ssb_job_missing_name_and_id(module_args, mocker):
     assert "one of the following is required" in result["msg"].lower()
 
 
-def test_ssb_job_both_name_and_id(module_args, mocker):
+def test_ssb_job_both_name_and_id(module_args):
     """Test that providing both name and job_id fails."""
     module_args(
         {

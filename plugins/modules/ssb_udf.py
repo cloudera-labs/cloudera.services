@@ -267,7 +267,7 @@ class SsbUdfModule(ServicesModule):
 
         # Initialize result variables
         self.changed = False
-        self.diff = {}
+        self.diff = {"before": "", "after": ""}
         self.udf: Optional[SsbUdf] = None
 
     def process(self) -> None:
@@ -296,7 +296,7 @@ class SsbUdfModule(ServicesModule):
                 if self.module._diff:
                     self.diff = {
                         "before": to_dict(existing),
-                        "after": None,
+                        "after": "",
                     }
 
                 if not self.module.check_mode:
@@ -339,7 +339,7 @@ class SsbUdfModule(ServicesModule):
 
                 if self.module._diff:
                     self.diff = {
-                        "before": None,
+                        "before": "",
                         "after": to_dict(incoming),
                     }
 
@@ -409,6 +409,7 @@ def main():
     output: Dict[str, Any] = dict(
         changed=result.changed,
         udf=to_dict(result.udf) if result.udf else {},
+        diff=result.diff,
     )
 
     if result.debug_log:

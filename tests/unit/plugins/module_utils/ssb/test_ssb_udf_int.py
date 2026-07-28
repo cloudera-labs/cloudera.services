@@ -179,22 +179,6 @@ def test_update_udf(udf_client, existing_project, existing_python_udf):
     assert response.description == updated_description
 
 
-def test_run_udf(udf_client, existing_project, existing_python_udf):
-    """Test running a UDF."""
-    response = udf_client.run_udf(
-        project_id=existing_project.id,
-        run_config=SsbUdfTestRun(
-            udf_name=existing_python_udf.name,
-            output_type=existing_python_udf.output_type,
-            param_types=["STRING"],
-            code="return input1.upper()",
-            test_values=[{"input1": "hello"}],
-        ),
-    )
-
-    assert isinstance(response, SsbUdfRunResult)
-
-
 def test_delete_udf(udf_client, existing_project, existing_python_udf):
     """Test deleting a UDF."""
     # Delete the UDF

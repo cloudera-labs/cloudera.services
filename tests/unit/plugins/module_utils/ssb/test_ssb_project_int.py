@@ -34,21 +34,21 @@ REQUIRED_ENV_VARS = [
 ]
 
 
-def test_list_projects(project_client, existing_project):
+def test_list_projects(ssb_project_client, existing_project):
     """Test listing all projects."""
-    response = project_client.list_projects()
+    response = ssb_project_client.list_projects()
 
     assert isinstance(response, list)
     assert isinstance(response[0], SsbProject)
     assert any(proj.id == existing_project.id for proj in response)
 
 
-def test_create_project_minimal(project_client, purge_project):
+def test_create_project_minimal(ssb_project_client, purge_project):
     """Test creating a project with minimal parameters."""
     project_name = "ansible-test-minimal"
 
     # Create the project
-    response = project_client.create_project(SsbProject(name=project_name))
+    response = ssb_project_client.create_project(SsbProject(name=project_name))
 
     # Set up for cleanup
     purge_project(response)
@@ -58,14 +58,14 @@ def test_create_project_minimal(project_client, purge_project):
     assert response.id is not None
 
 
-def test_create_project_with_description(project_client, purge_project):
+def test_create_project_with_description(ssb_project_client, purge_project):
     """Test creating a project with description and mv_prefix."""
     project_name = "ansible-test-description"
     description = "Test project with description"
     mv_prefix = "test_mv"
 
     # Create the project
-    response = project_client.create_project(
+    response = ssb_project_client.create_project(
         SsbProject(
             name=project_name,
             description=description,
@@ -83,49 +83,49 @@ def test_create_project_with_description(project_client, purge_project):
     assert response.id is not None
 
 
-def test_create_project_existing_name(project_client, existing_project):
+def test_create_project_existing_name(ssb_project_client, existing_project):
     """Test creating a project with an existing name."""
     project_name = existing_project.name
 
     with pytest.raises(AnsibleFailJson):
-        project_client.create_project(SsbProject(name=project_name))
+        ssb_project_client.create_project(SsbProject(name=project_name))
 
 
-def test_describe_project(project_client, existing_project):
+def test_describe_project(ssb_project_client, existing_project):
     """Test describing a specific project."""
-    response = project_client.describe_project(existing_project.id)
+    response = ssb_project_client.describe_project(existing_project.id)
 
     assert isinstance(response, SsbProject)
     assert response.id == existing_project.id
     assert response.name == existing_project.name
 
 
-def test_describe_project_nonexistent(project_client):
+def test_describe_project_nonexistent(ssb_project_client):
     """Test describing a specific project."""
-    response = project_client.describe_project("nonexistent-project-id-12345")
+    response = ssb_project_client.describe_project("nonexistent-project-id-12345")
 
     assert response is None
 
 
-def test_delete_project(project_client, deletable_project):
+def test_delete_project(ssb_project_client, deletable_project):
     """Test deleting a specific project."""
 
     # Delete the project
-    response = project_client.delete_project(deletable_project)
+    response = ssb_project_client.delete_project(deletable_project)
     assert response is None
 
     # Verify the project is deleted by trying to describe it
-    projects = project_client.list_projects()
+    projects = ssb_project_client.list_projects()
     assert not any(p.id == deletable_project.id for p in projects)
 
 
 @pytest.mark.skip(reason="Requires Git repository configuration")
-def test_create_project_with_git_sync(project_client, purge_project):
+def test_create_project_with_git_sync(ssb_project_client, purge_project):
     """Test creating a project with Git sync configuration."""
     project_name = "ansible-test-git-sync"
 
     # Create the project with Git sync
-    response = project_client.create_project(
+    response = ssb_project_client.create_project(
         name=project_name,
         scm_type="git",
         scm_url="https://github.com/example/repo.git",
@@ -145,12 +145,12 @@ def test_create_project_with_git_sync(project_client, purge_project):
 
 
 @pytest.mark.skip(reason="Requires Git repository configuration")
-def test_import_project(project_client, purge_project):
+def test_import_project(ssb_project_client, purge_project):
     """Test importing a project from Git."""
     project_name = "ansible-test-import"
 
     # Import the project
-    response = project_client.import_project(
+    response = ssb_project_client.import_project(
         name=project_name,
         scm_type="git",
         scm_url="https://github.com/example/repo.git",

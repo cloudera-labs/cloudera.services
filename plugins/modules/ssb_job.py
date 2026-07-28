@@ -298,7 +298,7 @@ class SsbJobModule(ServicesModule):
 
         # Initialize result variables
         self.changed = False
-        self.diff = {}
+        self.diff = {"before": {}, "after": {}}
         self.job: Optional[SsbJob] = None
         self.savepoint_id: Optional[int] = None
 
@@ -320,10 +320,7 @@ class SsbJobModule(ServicesModule):
 
         self.changed = True
         if self.module._diff:
-            self.diff = {
-                "before": None,
-                "after": {"name": self.name, "sql": self.sql},
-            }
+            self.diff["after"] = {"name": self.name, "sql": self.sql}
 
         if not self.module.check_mode:
             return client.create_job(self.project_id, job_request)
@@ -362,24 +359,14 @@ class SsbJobModule(ServicesModule):
         # Detect changes
         before_dict, after_dict = diff_dict(existing, desired)
 
-        if before_dict and after_dict:
+        if before_dict or after_dict:
             # Changes detected
             self.changed = True
             if self.module._diff:
-                # Merge parameter changes into diff
-                if self.diff:
-                    # If diff already has content, merge it
-                    if "before" not in self.diff:
-                        self.diff["before"] = {}
-                    if "after" not in self.diff:
-                        self.diff["after"] = {}
-                    self.diff["before"].update(before_dict)
-                    self.diff["after"].update(after_dict)
-                else:
-                    self.diff = {
-                        "before": before_dict,
-                        "after": after_dict,
-                    }
+                self.diff = {
+                    "before": before_dict,
+                    "after": after_dict,
+                }
 
             if not self.module.check_mode:
                 return client.update_job(self.project_id, desired)
@@ -419,10 +406,7 @@ class SsbJobModule(ServicesModule):
                 # Delete the job
                 self.changed = True
                 if self.module._diff:
-                    self.diff = {
-                        "before": to_dict(existing),
-                        "after": None,
-                    }
+                    self.diff["before"] = to_dict(existing)
 
                 if not self.module.check_mode:
                     client.delete_job(
@@ -460,30 +444,14 @@ class SsbJobModule(ServicesModule):
                     # Merge state info into existing diff (if job was created or updated)
                     if created:
                         # Job was just created - add state to "after"
-                        if (
-                            self.diff
-                            and "after" in self.diff
-                            and isinstance(self.diff["after"], dict)
-                        ):
-                            self.diff["after"]["state"] = SsbJobState.RUNNING.value
+                        self.diff["after"]["state"] = SsbJobState.RUNNING.value
                     elif self.diff:
-                        # Job was updated - merge state change into existing diff
-                        if "before" in self.diff and isinstance(
-                            self.diff["before"],
-                            dict,
-                        ):
-                            self.diff["before"]["state"] = job_ref.state
-                        if "after" in self.diff and isinstance(
-                            self.diff["after"],
-                            dict,
-                        ):
-                            self.diff["after"]["state"] = SsbJobState.RUNNING.value
+                        self.diff["before"]["state"] = job_ref.state
+                        self.diff["after"]["state"] = SsbJobState.RUNNING.value
                     else:
                         # Job existed but wasn't updated - show state change only
-                        self.diff = {
-                            "before": {"state": job_ref.state},
-                            "after": {"state": SsbJobState.RUNNING.value},
-                        }
+                        self.diff["before"]["state"] = job_ref.state
+                        self.diff["after"]["state"] = SsbJobState.RUNNING.value
 
                 if not self.module.check_mode:
                     runtime_config = SsbRuntimeConfig(
@@ -529,30 +497,15 @@ class SsbJobModule(ServicesModule):
                     # Merge state info into existing diff (if job was created or updated)
                     if created:
                         # Job was just created - add state to "after"
-                        if (
-                            self.diff
-                            and "after" in self.diff
-                            and isinstance(self.diff["after"], dict)
-                        ):
-                            self.diff["after"]["state"] = SsbJobState.STOPPED.value
+                        self.diff["after"]["state"] = SsbJobState.STOPPED.value
                     elif self.diff:
                         # Job was updated - merge state change into existing diff
-                        if "before" in self.diff and isinstance(
-                            self.diff["before"],
-                            dict,
-                        ):
-                            self.diff["before"]["state"] = job_ref.state
-                        if "after" in self.diff and isinstance(
-                            self.diff["after"],
-                            dict,
-                        ):
-                            self.diff["after"]["state"] = SsbJobState.STOPPED.value
+                        self.diff["before"]["state"] = job_ref.state
+                        self.diff["after"]["state"] = SsbJobState.STOPPED.value
                     else:
                         # Job existed but wasn't updated - show state change only
-                        self.diff = {
-                            "before": {"state": job_ref.state},
-                            "after": {"state": SsbJobState.STOPPED.value},
-                        }
+                        self.diff["before"] = {"state": job_ref.state}
+                        self.diff["after"] = {"state": SsbJobState.STOPPED.value}
 
                 if not self.module.check_mode:
                     stop_config = SsbJobStop(
@@ -608,28 +561,19 @@ class SsbJobModule(ServicesModule):
                 # Merge state info into existing diff (if job was created or updated)
                 if created:
                     # Job was just created - add state to "after"
-                    if (
-                        self.diff
-                        and "after" in self.diff
-                        and isinstance(self.diff["after"], dict)
-                    ):
-                        self.diff["after"]["state"] = SsbJobState.RUNNING.value
+                    self.diff["after"]["state"] = SsbJobState.RUNNING.value
                 elif self.diff:
                     # Job was updated - merge state change into existing diff
-                    if "before" in self.diff and isinstance(self.diff["before"], dict):
-                        self.diff["before"][
-                            "state"
-                        ] = job_ref.state  # pyright: ignore[reportOptionalMemberAccess]
-                    if "after" in self.diff and isinstance(self.diff["after"], dict):
-                        self.diff["after"]["state"] = SsbJobState.RUNNING.value
+                    self.diff["before"][
+                        "state"
+                    ] = job_ref.state  # pyright: ignore[reportOptionalMemberAccess]
+                    self.diff["after"]["state"] = SsbJobState.RUNNING.value
                 else:
                     # Job existed but wasn't updated - show state change only
-                    self.diff = {
-                        "before": {
-                            "state": job_ref.state,  # pyright: ignore[reportOptionalMemberAccess]
-                        },
-                        "after": {"state": SsbJobState.RUNNING.value},
-                    }
+                    self.diff["before"][
+                        "state"
+                    ] = job_ref.state  # pyright: ignore[reportOptionalMemberAccess]
+                    self.diff["after"]["state"] = SsbJobState.RUNNING.value
 
             if not self.module.check_mode:
                 runtime_config = SsbRuntimeConfig(

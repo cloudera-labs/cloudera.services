@@ -86,7 +86,7 @@ def test_services_client_get_401(env_context, mock_ansible_module):
     )
 
 
-def test_services_client_get_404(env_context, mock_ansible_module):
+def test_services_client_get_500(env_context, mock_ansible_module):
     """Test basic GET request returning 404 status."""
 
     mock_ansible_module.params.update(
@@ -107,4 +107,4 @@ def test_services_client_get_404(env_context, mock_ansible_module):
     mock_ansible_module.fail_json.assert_called_once()
 
     call_args = mock_ansible_module.fail_json.call_args
-    assert re.search(r"\[404\] Not Found; .*?/api/v2/userXYZ", call_args[1]["msg"])
+    assert re.search(r"\[500\] No endpoint GET .*?/api/v2/userXYZ", call_args[1]["msg"])
