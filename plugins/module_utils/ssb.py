@@ -615,19 +615,6 @@ class SsbUdfClient:
             f"/api/v2/projects/{project_id}/udfs/{udf_id}",
         )
 
-    def run_udf(
-        self,
-        project_id: str,
-        run_config: SsbUdfTestRun,
-    ) -> SsbUdfRunResult:
-        return from_dict(
-            SsbUdfRunResult,
-            self.api_client.post(
-                f"/api/v2/projects/{project_id}/udfs/run",
-                data=snake_dict_to_camel_dict(to_dict(run_config)),
-            ),
-        )
-
 
 @dataclass
 class SsbCustomLogConfig:
