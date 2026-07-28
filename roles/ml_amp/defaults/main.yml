@@ -1,9 +1,0 @@
----
-
-amp_metadata_file: "{{ mandatory }}"
-amp_git_url: "{{ mandatory }}" # Currently... will enable upload option later
-
-#amp_project_name: "{{ undef }}"
-#amp_project_desc: "{{ undef }}"
-#amp_project_visibility: "{{ undef }}"
-amp_project_env_vars: {}
