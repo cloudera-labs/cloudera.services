@@ -151,7 +151,7 @@ class MlRuntimeRepoModule(MlServicesModule):
 
         # Initialize the return values
         self.changed = False
-        self.diff = {}
+        self.diff = {"before": {}, "after": {}}
         self.runtime_repo: Optional[MlRuntimeRepo] = None
 
     def _fail(self, msg: str) -> NoReturn:
@@ -178,7 +178,7 @@ class MlRuntimeRepoModule(MlServicesModule):
                     self._fail("Runtime repo ID is invalid from existing repo.")
                 self.changed = True
                 if self.module._diff:
-                    self.diff = {"before": to_dict(existing), "after": None}
+                    self.diff["before"] = to_dict(existing)
                 if not self.module.check_mode:
                     client.delete_runtime_repo(existing.id)
                     self.runtime_repo = None
@@ -195,7 +195,7 @@ class MlRuntimeRepoModule(MlServicesModule):
             incoming = MlRuntimeRepo(name=self.name, url=self.url)
             self.changed = True
             if self.module._diff:
-                self.diff = {"before": None, "after": to_dict(incoming)}
+                self.diff["after"] = to_dict(incoming)
             if not self.module.check_mode:
                 self.runtime_repo = client.create_runtime_repo(incoming)
             else:
@@ -214,7 +214,8 @@ class MlRuntimeRepoModule(MlServicesModule):
         if prev_config or next_config:
             self.changed = True
             if self.module._diff:
-                self.diff = {"before": prev_config, "after": next_config}
+                self.diff["before"] = prev_config
+                self.diff["after"] = next_config
             if not self.module.check_mode:
                 self.runtime_repo = client.update_runtime_repo(desired)
             else:
@@ -227,6 +228,7 @@ def main():
     output: Dict[str, Any] = dict(
         changed=result.changed,
         runtime_repo=to_dict(result.runtime_repo) if result.runtime_repo else {},
+        diff=result.diff,
     )
 
     if result.debug_log:

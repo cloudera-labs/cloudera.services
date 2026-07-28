@@ -459,7 +459,7 @@ class MlProjectJobModule(MlServicesModule):
 
         # Initialize the return values
         self.changed = False
-        self.diff = {}
+        self.diff = {"before": {}, "after": {}}
         self.job: Optional[MlJob] = None
 
     def _fail(self, msg: str) -> NoReturn:
@@ -570,7 +570,7 @@ class MlProjectJobModule(MlServicesModule):
                     self._fail("Job ID is invalid from existing job.")
                 self.changed = True
                 if self.module._diff:
-                    self.diff = {"before": to_dict(existing), "after": None}
+                    self.diff["before"] = to_dict(existing)
                 if not self.module.check_mode:
                     client.delete_job(project_id, existing.id)
             return
@@ -591,7 +591,7 @@ class MlProjectJobModule(MlServicesModule):
             incoming = self._incoming_job()
             self.changed = True
             if self.module._diff:
-                self.diff = {"before": None, "after": to_dict(incoming)}
+                self.diff["after"] = to_dict(incoming)
             if not self.module.check_mode:
                 self.job = client.create_job(project_id, incoming)
             else:
@@ -638,7 +638,8 @@ class MlProjectJobModule(MlServicesModule):
             if prev_config or next_config:
                 self.changed = True
                 if self.module._diff:
-                    self.diff = {"before": prev_config, "after": next_config}
+                    self.diff["before"] = prev_config
+                    self.diff["after"] = next_config
                 if not self.module.check_mode:
                     self.job = client.update_job(project_id, desired)
                 else:
@@ -651,6 +652,7 @@ def main():
     output: Dict[str, Any] = dict(
         changed=result.changed,
         job=to_dict(result.job) if result.job else {},
+        diff=result.diff,
     )
 
     if result.debug_log:

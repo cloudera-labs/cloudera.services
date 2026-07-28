@@ -360,7 +360,7 @@ class MlProjectModule(MlServicesModule):
 
         # Initialize the return values
         self.changed = False
-        self.diff = {}
+        self.diff = {"before": {}, "after": {}}
         self.project: Optional[MlProject] = None
 
     def _merged_environment(self, existing: MlProject) -> Any:
@@ -401,7 +401,7 @@ class MlProjectModule(MlServicesModule):
                 self.changed = True
 
                 if self.module._diff:
-                    self.diff = {"before": to_dict(existing), "after": None}
+                    self.diff["before"] = to_dict(existing)
 
                 if not self.module.check_mode:
                     client.delete_project(existing.id)
@@ -438,7 +438,7 @@ class MlProjectModule(MlServicesModule):
             self.changed = True
 
             if self.module._diff:
-                self.diff = {"before": None, "after": to_dict(incoming)}
+                self.diff["after"] = to_dict(incoming)
 
             if not self.module.check_mode:
                 self.project = client.create_project(incoming)
@@ -478,7 +478,8 @@ class MlProjectModule(MlServicesModule):
             self.changed = True
 
             if self.module._diff:
-                self.diff = {"before": prev_config, "after": next_config}
+                self.diff["before"] = prev_config
+                self.diff["after"] = next_config
 
             if not self.module.check_mode:
                 self.project = client.update_project(desired)
@@ -494,6 +495,7 @@ def main():
     output: Dict[str, Any] = dict(
         changed=result.changed,
         project=to_dict(result.project) if result.project else {},
+        diff=result.diff,
     )
 
     if result.debug_log:

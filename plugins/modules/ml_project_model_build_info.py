@@ -336,7 +336,9 @@ class MlProjectModelBuildInfoModule(MlServicesModule):
         model_id = self._resolve_model_id(project_id)
         client = MlModelBuildClient(self.api_client)
 
-        builds = [b for b in client.list_builds(project_id, model_id) if self._matches(b)]
+        builds = [
+            b for b in client.list_builds(project_id, model_id) if self._matches(b)
+        ]
         # Return the most recently updated builds first.
         self.build_list = sorted(
             builds,

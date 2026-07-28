@@ -44,7 +44,9 @@ def test_status_by_identifiers(module_args, mocker):
     """Setting status by identifiers updates and reports changed."""
     mock_status = mocker.patch(f"{ADDONS}.update_addon_status", return_value=1)
 
-    module_args(_base_args({"identifiers": ["hadoop-cli-7.2.18"], "status": "DISABLED"}))
+    module_args(
+        _base_args({"identifiers": ["hadoop-cli-7.2.18"], "status": "DISABLED"}),
+    )
 
     with pytest.raises(AnsibleExitJson) as e:
         ml_runtime_addon.main()
@@ -52,7 +54,9 @@ def test_status_by_identifiers(module_args, mocker):
     assert e.value["changed"] is True
     assert e.value["runtime_addon"]["rows_affected"] == 1
     mock_status.assert_called_once_with(
-        "DISABLED", ids=None, identifiers=["hadoop-cli-7.2.18"],
+        "DISABLED",
+        ids=None,
+        identifiers=["hadoop-cli-7.2.18"],
     )
 
 

@@ -165,9 +165,7 @@ class MlRuntimeAddonInfoModule(MlServicesModule):
 
     def process(self) -> None:
         client = MlRuntimeAddonClient(self.api_client)
-        self.addon_list = [
-            a for a in client.list_runtime_addons() if self._matches(a)
-        ]
+        self.addon_list = [a for a in client.list_runtime_addons() if self._matches(a)]
 
 
 def main():

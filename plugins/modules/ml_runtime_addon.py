@@ -127,8 +127,10 @@ class MlRuntimeAddonModule(MlServicesModule):
         self.identifiers = self.get_param("identifiers")
         self.status = self.get_param("status")
 
+        # TODO Add diff support for runtime addon management and status change operations.
         # Initialize the return values
         self.changed = False
+        self.diff = {"before": {}, "after": {}}
         self.runtime_addon: Dict[str, Any] = {}
 
     def process(self) -> None:

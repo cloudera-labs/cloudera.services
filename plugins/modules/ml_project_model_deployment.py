@@ -275,7 +275,7 @@ class MlProjectModelDeploymentModule(MlServicesModule):
 
         # Initialize the return values
         self.changed = False
-        self.diff = {}
+        self.diff = {"before": {}, "after": {}}
         self.deployment: Optional[MlModelDeployment] = None
 
     def _fail(self, msg: str) -> NoReturn:
@@ -310,7 +310,11 @@ class MlProjectModelDeploymentModule(MlServicesModule):
             model = client.describe_model(project_id, self.model_id)
         else:
             model = next(
-                (m for m in client.list_models(project_id) if m.name == self.model_name),
+                (
+                    m
+                    for m in client.list_models(project_id)
+                    if m.name == self.model_name
+                ),
                 None,
             )
         if not model:
@@ -399,10 +403,14 @@ class MlProjectModelDeploymentModule(MlServicesModule):
                     self._fail("Deployment ID is invalid from existing deployment.")
                 self.changed = True
                 if self.module._diff:
-                    self.diff = {"before": to_dict(existing), "after": None}
+                    # TODO Fix the diff to show the stopped deployment "after"
+                    self.diff["before"] = to_dict(existing)
                 if not self.module.check_mode:
                     self.deployment = client.stop_deployment(
-                        project_id, model_id, build_id, existing.id,
+                        project_id,
+                        model_id,
+                        build_id,
+                        existing.id,
                     )
             return
 
@@ -413,10 +421,13 @@ class MlProjectModelDeploymentModule(MlServicesModule):
                     self._fail("Deployment ID is invalid from existing deployment.")
                 self.changed = True
                 if self.module._diff:
-                    self.diff = {"before": to_dict(existing), "after": None}
+                    self.diff["before"] = to_dict(existing)
                 if not self.module.check_mode:
                     client.delete_deployment(
-                        project_id, model_id, build_id, existing.id,
+                        project_id,
+                        model_id,
+                        build_id,
+                        existing.id,
                     )
                     self.deployment = None
             return
@@ -441,10 +452,13 @@ class MlProjectModelDeploymentModule(MlServicesModule):
         incoming = self._incoming_deployment(build_id, base=base)
         self.changed = True
         if self.module._diff:
-            self.diff = {"before": None, "after": to_dict(incoming)}
+            self.diff["after"] = to_dict(incoming)
         if not self.module.check_mode:
             self.deployment = client.create_deployment(
-                project_id, model_id, build_id, incoming,
+                project_id,
+                model_id,
+                build_id,
+                incoming,
             )
         else:
             self.deployment = incoming
@@ -456,6 +470,7 @@ def main():
     output: Dict[str, Any] = dict(
         changed=result.changed,
         deployment=to_dict(result.deployment) if result.deployment else {},
+        diff=result.diff,
     )
 
     if result.debug_log:

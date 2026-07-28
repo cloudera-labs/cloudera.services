@@ -38,7 +38,9 @@ API_KEY = "test-api-key"
 PROJECT_ID = "aaaa-bbbb-cccc-dddd"
 
 PROJECTS = "ansible_collections.cloudera.services.plugins.modules.ml_project_job.MlProjectClient"
-JOBS = "ansible_collections.cloudera.services.plugins.modules.ml_project_job.MlJobClient"
+JOBS = (
+    "ansible_collections.cloudera.services.plugins.modules.ml_project_job.MlJobClient"
+)
 
 
 def _mock_project(
@@ -155,7 +157,11 @@ def test_create_kernel_legacy_engine(module_args, mocker):
     """kernel is accepted (and runtime not required) for a legacy-engine project."""
     _mock_project(
         mocker,
-        project=MlProject(id=PROJECT_ID, name="proj", default_engine_type="legacy_engine"),
+        project=MlProject(
+            id=PROJECT_ID,
+            name="proj",
+            default_engine_type="legacy_engine",
+        ),
     )
     mocker.patch(f"{JOBS}.list_jobs", return_value=[])
     mock_create = mocker.patch(

@@ -363,7 +363,7 @@ class MlProjectApplicationModule(MlServicesModule):
 
         # Initialize the return values
         self.changed = False
-        self.diff = {}
+        self.diff = {"before": {}, "after": {}}
         self.application: Optional[MlApplication] = None
 
     def _resolve_project_id(self) -> str:
@@ -451,7 +451,7 @@ class MlProjectApplicationModule(MlServicesModule):
                     )
                 self.changed = True
                 if self.module._diff:
-                    self.diff = {"before": to_dict(existing), "after": None}
+                    self.diff["before"] = to_dict(existing)
                 if not self.module.check_mode:
                     client.delete_application(project_id, existing.id)
             return
@@ -468,7 +468,7 @@ class MlProjectApplicationModule(MlServicesModule):
             incoming = self._incoming_application()
             self.changed = True
             if self.module._diff:
-                self.diff = {"before": None, "after": to_dict(incoming)}
+                self.diff["after"] = to_dict(incoming)
             if not self.module.check_mode:
                 self.application = client.create_application(project_id, incoming)
             else:
@@ -509,7 +509,8 @@ class MlProjectApplicationModule(MlServicesModule):
             if prev_config or next_config:
                 self.changed = True
                 if self.module._diff:
-                    self.diff = {"before": prev_config, "after": next_config}
+                    self.diff["before"] = prev_config
+                    self.diff["after"] = next_config
                 if not self.module.check_mode:
                     self.application = client.update_application(project_id, desired)
                 else:
@@ -535,6 +536,7 @@ def main():
     output: Dict[str, Any] = dict(
         changed=result.changed,
         application=to_dict(result.application) if result.application else {},
+        diff=result.diff,
     )
 
     if result.debug_log:

@@ -218,7 +218,7 @@ class MlProjectModelModule(MlServicesModule):
 
         # Initialize the return values
         self.changed = False
-        self.diff = {}
+        self.diff = {"before": {}, "after": {}}
         self.model: Optional[MlModel] = None
 
     def _fail(self, msg: str) -> NoReturn:
@@ -274,7 +274,7 @@ class MlProjectModelModule(MlServicesModule):
                     self._fail("Model ID is invalid from existing model.")
                 self.changed = True
                 if self.module._diff:
-                    self.diff = {"before": to_dict(existing), "after": None}
+                    self.diff["before"] = to_dict(existing)
                 if not self.module.check_mode:
                     client.delete_model(project_id, existing.id)
             return
@@ -291,7 +291,7 @@ class MlProjectModelModule(MlServicesModule):
             incoming = self._incoming_model()
             self.changed = True
             if self.module._diff:
-                self.diff = {"before": None, "after": to_dict(incoming)}
+                self.diff["after"] = to_dict(incoming)
             if not self.module.check_mode:
                 self.model = client.create_model(project_id, incoming)
             else:
@@ -314,7 +314,8 @@ class MlProjectModelModule(MlServicesModule):
             if prev_config or next_config:
                 self.changed = True
                 if self.module._diff:
-                    self.diff = {"before": prev_config, "after": next_config}
+                    self.diff["before"] = prev_config
+                    self.diff["after"] = next_config
                 if not self.module.check_mode:
                     self.model = client.update_model(project_id, desired)
                 else:
@@ -327,6 +328,7 @@ def main():
     output: Dict[str, Any] = dict(
         changed=result.changed,
         model=to_dict(result.model) if result.model else {},
+        diff=result.diff,
     )
 
     if result.debug_log:

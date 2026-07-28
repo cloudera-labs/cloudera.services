@@ -83,7 +83,9 @@ def test_present_idempotent(module_args, mocker):
     mocker.patch(f"{REPOS}.list_runtime_repos", return_value=[EXISTING])
     mock_update = mocker.patch(f"{REPOS}.update_runtime_repo")
 
-    module_args(_base_args({"name": "internal", "repo_url": "https://repo.example.com/a"}))
+    module_args(
+        _base_args({"name": "internal", "repo_url": "https://repo.example.com/a"}),
+    )
 
     with pytest.raises(AnsibleExitJson) as e:
         ml_runtime_repo.main()
@@ -100,7 +102,9 @@ def test_update_url(module_args, mocker):
         return_value=replace(EXISTING, url="https://repo.example.com/c"),
     )
 
-    module_args(_base_args({"name": "internal", "repo_url": "https://repo.example.com/c"}))
+    module_args(
+        _base_args({"name": "internal", "repo_url": "https://repo.example.com/c"}),
+    )
 
     with pytest.raises(AnsibleExitJson) as e:
         ml_runtime_repo.main()
@@ -162,7 +166,11 @@ def test_check_mode_create(module_args, mocker):
 
     module_args(
         _base_args(
-            {"name": "new", "repo_url": "https://repo.example.com/b", "_ansible_check_mode": True},
+            {
+                "name": "new",
+                "repo_url": "https://repo.example.com/b",
+                "_ansible_check_mode": True,
+            },
         ),
     )
 

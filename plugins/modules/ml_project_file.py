@@ -191,7 +191,7 @@ class MlProjectFileModule(MlServicesModule):
 
         # Initialize the return values
         self.changed = False
-        self.diff = {}
+        self.diff = {"before": {}, "after": {}}
         self.file: Optional[MlFile] = None
 
     def _resolve_project_id(self) -> str:
@@ -231,7 +231,7 @@ class MlProjectFileModule(MlServicesModule):
             if existing:
                 self.changed = True
                 if self.module._diff:
-                    self.diff = {"before": {"path": self.path}, "after": None}
+                    self.diff["before"] = {"path": self.path}
                 if not self.module.check_mode:
                     client.delete_file(project_id, self.path)
             return
@@ -248,10 +248,8 @@ class MlProjectFileModule(MlServicesModule):
 
         self.changed = True
         if self.module._diff:
-            self.diff = {
-                "before": {"path": self.path} if existing else None,
-                "after": {"path": self.path},
-            }
+            self.diff["before"] = {"path": self.path} if existing else {}
+            self.diff["after"] = {"path": self.path}
         if not self.module.check_mode:
             client.upload_file(
                 project_id,
@@ -267,6 +265,7 @@ def main():
     output: Dict[str, Any] = dict(
         changed=result.changed,
         file=to_dict(result.file) if result.file else {},
+        diff=result.diff,
     )
 
     if result.debug_log:

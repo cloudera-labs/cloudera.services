@@ -41,7 +41,9 @@ PROJECT_ID = "aaaa-bbbb-cccc-dddd"
 MODEL_ID = "model-1"
 BUILD_ID = "build-1"
 
-MOD = "ansible_collections.cloudera.services.plugins.modules.ml_project_model_deployment"
+MOD = (
+    "ansible_collections.cloudera.services.plugins.modules.ml_project_model_deployment"
+)
 PROJECTS = f"{MOD}.MlProjectClient"
 MODELS = f"{MOD}.MlModelClient"
 BUILDS = f"{MOD}.MlModelBuildClient"
@@ -82,7 +84,11 @@ def test_started_creates_when_absent(module_args, mocker):
     _mock_chain(mocker)
     mock_create = mocker.patch(
         f"{DEPLOYMENTS}.create_deployment",
-        return_value=MlModelDeployment(id="dep-1", build_id=BUILD_ID, status="deployed"),
+        return_value=MlModelDeployment(
+            id="dep-1",
+            build_id=BUILD_ID,
+            status="deployed",
+        ),
     )
 
     module_args(_base_args({"state": "started", "cpu": 1, "memory": 2}))
@@ -223,7 +229,11 @@ def test_restarted_creates_when_absent(module_args, mocker):
 def test_restarted_stops_then_creates(module_args, mocker):
     """state=restarted stops the running deployment and starts a new one."""
     existing = MlModelDeployment(
-        id="dep-1", build_id=BUILD_ID, status="deployed", cpu=2, memory=4,
+        id="dep-1",
+        build_id=BUILD_ID,
+        status="deployed",
+        cpu=2,
+        memory=4,
     )
     _mock_chain(mocker, deployments=[existing])
     mock_stop = mocker.patch(f"{DEPLOYMENTS}.stop_deployment")

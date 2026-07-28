@@ -34,7 +34,9 @@ from ansible_collections.cloudera.services.plugins.module_utils.ml import (
 BASE_URL = "https://ml-workspace.example.com"
 API_KEY = "test-api-key"
 
-RUNTIMES = "ansible_collections.cloudera.services.plugins.modules.ml_runtime.MlRuntimeClient"
+RUNTIMES = (
+    "ansible_collections.cloudera.services.plugins.modules.ml_runtime.MlRuntimeClient"
+)
 
 
 def _base_args(overrides=None):
@@ -49,7 +51,9 @@ def test_register(module_args, mocker):
     mock_register = mocker.patch(
         f"{RUNTIMES}.register_runtime",
         return_value=MlRuntimeRegistration(
-            validation_success=True, insert_success=True, details={"editor": "PBJ"},
+            validation_success=True,
+            insert_success=True,
+            details={"editor": "PBJ"},
         ),
     )
     mock_validate = mocker.patch(f"{RUNTIMES}.validate_runtime")
@@ -72,10 +76,15 @@ def test_register_validate_first(module_args, mocker):
     )
     mock_register = mocker.patch(
         f"{RUNTIMES}.register_runtime",
-        return_value=MlRuntimeRegistration(validation_success=True, insert_success=True),
+        return_value=MlRuntimeRegistration(
+            validation_success=True,
+            insert_success=True,
+        ),
     )
 
-    module_args(_base_args({"image_url": "registry.example.com/rt:1", "validate": True}))
+    module_args(
+        _base_args({"image_url": "registry.example.com/rt:1", "validate": True}),
+    )
 
     with pytest.raises(AnsibleExitJson) as e:
         ml_runtime.main()
@@ -93,7 +102,9 @@ def test_register_validation_fails(module_args, mocker):
     )
     mock_register = mocker.patch(f"{RUNTIMES}.register_runtime")
 
-    module_args(_base_args({"image_url": "registry.example.com/rt:1", "validate": True}))
+    module_args(
+        _base_args({"image_url": "registry.example.com/rt:1", "validate": True}),
+    )
 
     with pytest.raises(AnsibleFailJson, match="bad image"):
         ml_runtime.main()
@@ -106,7 +117,9 @@ def test_register_already_exists(module_args, mocker):
     mocker.patch(
         f"{RUNTIMES}.register_runtime",
         return_value=MlRuntimeRegistration(
-            validation_success=True, insert_success=False, reason="already exists",
+            validation_success=True,
+            insert_success=False,
+            reason="already exists",
         ),
     )
 
@@ -123,7 +136,9 @@ def test_status_by_image(module_args, mocker):
     mock_status = mocker.patch(f"{RUNTIMES}.update_runtime_status", return_value=1)
 
     module_args(
-        _base_args({"image_identifier": "registry.example.com/rt:1", "status": "DISABLED"}),
+        _base_args(
+            {"image_identifier": "registry.example.com/rt:1", "status": "DISABLED"},
+        ),
     )
 
     with pytest.raises(AnsibleExitJson) as e:
@@ -131,7 +146,9 @@ def test_status_by_image(module_args, mocker):
 
     assert e.value["changed"] is True
     mock_status.assert_called_once_with(
-        "DISABLED", runtime_id=None, image_identifier=["registry.example.com/rt:1"],
+        "DISABLED",
+        runtime_id=None,
+        image_identifier=["registry.example.com/rt:1"],
     )
 
 
@@ -162,7 +179,9 @@ def test_check_mode_register(module_args, mocker):
     mock_register = mocker.patch(f"{RUNTIMES}.register_runtime")
 
     module_args(
-        _base_args({"image_url": "registry.example.com/rt:1", "_ansible_check_mode": True}),
+        _base_args(
+            {"image_url": "registry.example.com/rt:1", "_ansible_check_mode": True},
+        ),
     )
 
     with pytest.raises(AnsibleExitJson) as e:

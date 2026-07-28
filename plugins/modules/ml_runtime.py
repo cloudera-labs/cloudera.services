@@ -146,8 +146,10 @@ class MlRuntimeModule(MlServicesModule):
         self.runtime_id = self.get_param("runtime_id")
         self.status = self.get_param("status")
 
+        # TODO Add diff support for runtime registration and status change operations.
         # Initialize the return values
         self.changed = False
+        self.diff = {"before": {}, "after": {}}
         self.runtime: Dict[str, Any] = {}
 
     def _fail(self, msg: str) -> NoReturn:
