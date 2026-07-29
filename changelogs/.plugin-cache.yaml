@@ -1,0 +1,214 @@
+objects:
+  role: {}
+plugins:
+  become: {}
+  cache: {}
+  callback: {}
+  cliconf: {}
+  connection: {}
+  filter: {}
+  httpapi: {}
+  inventory: {}
+  lookup: {}
+  module:
+    ml_project:
+      description: Create and delete Cloudera Machine Learning (CML) projects
+      name: ml_project
+      namespace: ''
+      version_added: 1.0.0
+    ml_project_application:
+      description: Manage a Cloudera Machine Learning (CML) project application
+      name: ml_project_application
+      namespace: ''
+      version_added: 1.0.0
+    ml_project_application_info:
+      description: Retrieve information about Cloudera Machine Learning (CML) project
+        applications
+      name: ml_project_application_info
+      namespace: ''
+      version_added: 1.0.0
+    ml_project_file:
+      description: Manage a file within a Cloudera Machine Learning (CML) project
+      name: ml_project_file
+      namespace: ''
+      version_added: 1.0.0
+    ml_project_file_info:
+      description: Retrieve information about files within a Cloudera Machine Learning
+        (CML) project
+      name: ml_project_file_info
+      namespace: ''
+      version_added: 1.0.0
+    ml_project_info:
+      description: Retrieve information about Cloudera Machine Learning (CML) projects
+      name: ml_project_info
+      namespace: ''
+      version_added: 1.0.0
+    ml_project_job:
+      description: Manage a Cloudera Machine Learning (CML) project job
+      name: ml_project_job
+      namespace: ''
+      version_added: 1.0.0
+    ml_project_job_info:
+      description: Retrieve information about Cloudera Machine Learning (CML) project
+        jobs
+      name: ml_project_job_info
+      namespace: ''
+      version_added: 1.0.0
+    ml_project_job_run:
+      description: Start or stop a Cloudera Machine Learning (CML) project job run
+      name: ml_project_job_run
+      namespace: ''
+      version_added: 1.0.0
+    ml_project_job_run_info:
+      description: Retrieve information about Cloudera Machine Learning (CML) project
+        job runs
+      name: ml_project_job_run_info
+      namespace: ''
+      version_added: 1.0.0
+    ml_project_model:
+      description: Manage a Cloudera Machine Learning (CML) project model
+      name: ml_project_model
+      namespace: ''
+      version_added: 1.0.0
+    ml_project_model_build:
+      description: Manage a Cloudera Machine Learning (CML) project model build
+      name: ml_project_model_build
+      namespace: ''
+      version_added: 1.0.0
+    ml_project_model_build_info:
+      description: Retrieve information about Cloudera Machine Learning (CML) project
+        model builds
+      name: ml_project_model_build_info
+      namespace: ''
+      version_added: 1.0.0
+    ml_project_model_deployment:
+      description: Manage a Cloudera Machine Learning (CML) project model deployment
+      name: ml_project_model_deployment
+      namespace: ''
+      version_added: 1.0.0
+    ml_project_model_deployment_info:
+      description: Retrieve information about Cloudera Machine Learning (CML) project
+        model deployments
+      name: ml_project_model_deployment_info
+      namespace: ''
+      version_added: 1.0.0
+    ml_project_model_info:
+      description: Retrieve information about Cloudera Machine Learning (CML) project
+        models
+      name: ml_project_model_info
+      namespace: ''
+      version_added: 1.0.0
+    ml_runtime:
+      description: Register or set the status of a Cloudera Machine Learning (CML)
+        runtime
+      name: ml_runtime
+      namespace: ''
+      version_added: 1.0.0
+    ml_runtime_addon:
+      description: Manage the status of Cloudera Machine Learning (CML) runtime addons
+      name: ml_runtime_addon
+      namespace: ''
+      version_added: 1.0.0
+    ml_runtime_addon_info:
+      description: Retrieve information about Cloudera Machine Learning (CML) runtime
+        addons
+      name: ml_runtime_addon_info
+      namespace: ''
+      version_added: 1.0.0
+    ml_runtime_info:
+      description: Retrieve information about Cloudera Machine Learning (CML) runtimes
+      name: ml_runtime_info
+      namespace: ''
+      version_added: 1.0.0
+    ml_runtime_repo:
+      description: Manage a Cloudera Machine Learning (CML) runtime repository
+      name: ml_runtime_repo
+      namespace: ''
+      version_added: 1.0.0
+    ml_runtime_repo_info:
+      description: Retrieve information about Cloudera Machine Learning (CML) runtime
+        repositories
+      name: ml_runtime_repo_info
+      namespace: ''
+      version_added: 1.0.0
+    ssb_data_source:
+      description: Manage SSB project data sources
+      name: ssb_data_source
+      namespace: ''
+      version_added: 1.0.0
+    ssb_data_source_info:
+      description: Retrieve information about SSB project data sources
+      name: ssb_data_source_info
+      namespace: ''
+      version_added: 1.0.0
+    ssb_environment:
+      description: Manage SSB project environments
+      name: ssb_environment
+      namespace: ''
+      version_added: 1.0.0
+    ssb_environment_info:
+      description: Retrieve information about SSB project environments
+      name: ssb_environment_info
+      namespace: ''
+      version_added: 1.0.0
+    ssb_job:
+      description: Manage SSB jobs
+      name: ssb_job
+      namespace: ''
+      version_added: 1.0.0
+    ssb_job_info:
+      description: Retrieve information about SSB jobs
+      name: ssb_job_info
+      namespace: ''
+      version_added: 1.0.0
+    ssb_project:
+      description: Manage SSB projects
+      name: ssb_project
+      namespace: ''
+      version_added: 1.0.0
+    ssb_project_info:
+      description: Retrieve information about SSB projects
+      name: ssb_project_info
+      namespace: ''
+      version_added: 1.0.0
+    ssb_table:
+      description: Manage SSB project tables
+      name: ssb_table
+      namespace: ''
+      version_added: 1.0.0
+    ssb_table_info:
+      description: Retrieve information about SSB project tables
+      name: ssb_table_info
+      namespace: ''
+      version_added: 1.0.0
+    ssb_udf:
+      description: Manage SSB User Defined Functions (UDFs)
+      name: ssb_udf
+      namespace: ''
+      version_added: 1.0.0
+    ssb_udf_info:
+      description: Retrieve information about SSB project User Defined Functions (UDFs)
+      name: ssb_udf_info
+      namespace: ''
+      version_added: 1.0.0
+    ssb_user:
+      description: Manage the current SSB user's settings
+      name: ssb_user
+      namespace: ''
+      version_added: 1.0.0
+    ssb_user_info:
+      description: Retrieve information about the current SSB user
+      name: ssb_user_info
+      namespace: ''
+      version_added: 1.0.0
+    ssb_user_keytab:
+      description: Set the user keytab in SSB
+      name: ssb_user_keytab
+      namespace: ''
+      version_added: 1.0.0
+  netconf: {}
+  shell: {}
+  strategy: {}
+  test: {}
+  vars: {}
+version: 1.0.0

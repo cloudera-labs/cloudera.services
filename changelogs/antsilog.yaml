@@ -1,0 +1,50 @@
+# Antsilog Configuration
+# Define how pull requests should be categorized in the changelog
+
+# Default category for PRs without matching labels
+default_category: trivial
+
+# Labels that exclude PRs from changelog
+skip_labels:
+  - skip-changelog
+  - duplicate
+  - wontfix
+
+# Category definitions (lower priority number = higher importance)
+categories:
+  - name: breaking_changes
+    priority: 1
+    labels:
+      - breaking-change
+      - breaking
+
+  - name: major_changes
+    priority: 2
+    labels:
+      - major
+      - feature
+
+  - name: minor_changes
+    priority: 3
+    labels:
+      - minor
+      - enhancement
+
+  - name: bugfixes
+    priority: 4
+    labels:
+      - bug
+      - fix
+      - bugfix
+
+  - name: deprecated_features
+    priority: 5
+    labels:
+      - deprecated
+
+  - name: trivial
+    priority: 6
+    labels:
+      - trivial
+      - docs
+      - documentation
