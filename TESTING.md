@@ -2,6 +2,8 @@
 
 The project has rallied around using `pytest` for most everything within the collection, including _integration_ tests.
 
+## Environment Variables
+
 To run integration tests, set the following environment variables.
 
 _For Cloudera SQL Streams Builder_
@@ -28,10 +30,12 @@ _For Cloudera AI_
 - `CML_API_KEY`
 
 
-Integration tests are decorated with `integration_api` and `integration_token` and will run dynamically based on the presence of the above variables.
+Integration tests use the `env_context` fixture to gate the associated fixture finalizations to check for required environment variables.
 
 > [!IMPORTANT]
 > Make sure `PYTHONPATH` is set properly in order to find the nested Ansible imports, i.e. `ansible_collections.namespace.collection.plugins.modules`.
+
+## Hatch
 
 `hatch` is configured to run tests via a matrix of Python vs. Ansible versions.
 
