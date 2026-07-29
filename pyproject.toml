@@ -12,7 +12,15 @@ authors = [
   { name = "Ronald Suplina", email = "rsuplina@cloudera.com" }
 ]
 classifiers = []
-dependencies = []
+dependencies = [
+  # Runtime dependencies of the collection. Keep in sync with requirements.txt.
+  # NOTE: ansible-core is intentionally omitted here (it is the runtime platform,
+  # provided by the execution environment)
+  "apache-atlas >=0.0.15",
+  "apache-ranger >=0.0.12",
+  "nipyapi >=1.5.0",
+  "kafka-python >=2.3.0",
+]
 
 [tool.hatch.build.targets.wheel]
 bypass-selection = true
@@ -24,22 +32,16 @@ scheme = "semver"
 validate-bump = true
 
 [tool.hatch.envs.default]
-detached = true
-dependencies = [
+# The project is installed (dev mode) so its runtime dependencies from
+# [project.dependencies] are pulled in automatically -- keeping that table the
+# single source of truth. Utility dependencies below live only in Hatch envs.
+extra-dependencies = [
+  "ansible-core<2.17", # For RHEL 8 support
   "pre-commit",
   "pytest",
   "pytest-mock",
-  "molecule",
-  "molecule-plugins",
-  "molecule-plugins[ec2]",
-  "ansible-core<2.17", # For RHEL 8 support
   "ansible-lint",
   "antsibull-docs >= 2.0.0, < 3.0.0",
-  "apache-atlas >=0.0.15",
-  "apache-ranger >=0.0.12",
-  "nipyapi >=1.5.0",
-  "kafka-python >=2.3.0",
-  "requests >=2.32.0"
 ]
 
 [tool.hatch.envs.default.scripts]
@@ -51,20 +53,15 @@ lint = [
 [tool.hatch.envs.hatch-test]
 matrix-name-format = "{variable}_{value}"
 extra-dependencies = [
+  "pytest-mock",
   "molecule",
   "molecule-plugins",
   "molecule-plugins[ec2]",
   # "ansible-core<2.17", # Handled by matrix overrides
-  "apache-atlas >=0.0.15",
-  "apache-ranger >=0.0.12",
-  "nipyapi >=1.5.0",
-  "kafka-python >=2.3.0",
-  "requests >=2.32.0"
 ]
 
 [tool.hatch.envs.hatch-test.scripts]
 run = [
-    # "pip list --verbose",
     "pytest{env:HATCH_TEST_ARGS:} {args}"
 ]
 

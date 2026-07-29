@@ -1,6 +1,7 @@
 # cloudera.services - Cloudera Data Platform (CDP) for Public and Private Cloud data and compute services
 
 [![API documentation](https://github.com/cloudera-labs/cloudera.services/actions/workflows/publish_docs.yml/badge.svg?branch=main&event=push)](https://github.com/cloudera-labs/cloudera.services/actions/workflows/publish_docs.yml)
+[![FOSSA Status](https://app.fossa.com/api/projects/custom%2B449%2Fgit%40github.com%3Acloudera-labs%2Fcloudera.services.git.svg?type=shield&issueType=license)](https://app.fossa.com/projects/custom%2B449%2Fgit%40github.com%3Acloudera-labs%2Fcloudera.services.git?ref=badge_shield&issueType=license)
 
 `cloudera.services` is an Ansible collection that lets you use and manage your **[Cloudera Data Platform (CDP)](https://www.cloudera.com/products/cloudera-data-platform.html) Public and Private Cloud** execution services and resources for both data and compute. With this collection, you can:
 
@@ -102,7 +103,7 @@ Your local documentation will be found at `docsbuild/build/html`.
 You can also lint the documentation with the following command:
 
 ```bash
-hatch run docs:lint
+hatch run lint
 ```
 
 ## Preparing a New Version

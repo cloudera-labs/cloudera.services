@@ -4,3 +4,7 @@
 /temp-rst
 /build
 /rst
+
+# antsibull-docs regenerates this. Docs deps live in the Hatch
+# `docs` env instead; keep this file out of the repo.
+/requirements.txt
