@@ -58,7 +58,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ env.HATCH_DATA_DIR }}
-          key: hatch-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          key: hatch-${{ runner.os }}-${{ hashFiles('**/pyproject.toml') }} # '**/hatch.lock' when hatch.lock is supported
           restore-keys: |
             hatch-${{ runner.os }}-
 
