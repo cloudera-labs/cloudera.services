@@ -20,12 +20,15 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  HATCH_DATA_DIR: ~/.hatch
+
 jobs:
   validate-docs:
     name: Validate API documentation
     runs-on: ubuntu-latest
     steps:
-      - name: Configure environment
+      - name: Configure Ansible collections path
         id: vars
         uses: actions/github-script@v9
         with:
@@ -38,6 +41,11 @@ jobs:
             const checkoutPath = `ansible_collections/${path}`
             core.setOutput('checkout-path', checkoutPath)
 
+      - name: Checkout project into Ansible collections path
+        uses: actions/checkout@v6
+        with:
+          path: ${{ steps.vars.outputs.checkout-path }}
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -45,12 +53,15 @@ jobs:
 
       - name: Install Hatch
         run: pip install hatch
-
-      - name: Checkout project into Ansible collections path
-        uses: actions/checkout@v6
+     
+      - name: Cache Hatch virtual environments
+        uses: actions/cache@v6
         with:
-          path: ${{ steps.vars.outputs.checkout-path }}
-        
+          path: ${{ env.HATCH_DATA_DIR }}
+          key: hatch-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            hatch-${{ runner.os }}-
+
       - name: Render API documentation
         run: hatch run docs:render
         working-directory: ${{ steps.vars.outputs.checkout-path }}
@@ -59,6 +70,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          path: ${{ steps.vars.outputs.checkout-path }}/docsbuild/antsibull.log
+          path: ${{ steps.vars.outputs.checkout-path }}/antsibull.log
           name: antsibull-${{ github.sha }}.log
           retention-days: 7 
