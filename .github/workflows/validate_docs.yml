@@ -46,16 +46,19 @@ jobs:
       - name: Install Hatch
         run: pip install hatch
 
-      - name: Checkout project
+      - name: Checkout project into Ansible collections path
         uses: actions/checkout@v6
+        with:
+          path: ${{ steps.vars.outputs.checkout-path }}
         
       - name: Render API documentation
         run: hatch run docs:render
+        working-directory: ${{ steps.vars.outputs.checkout-path }}
 
       - name: Upload antsibull-doc log artifact
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          path: docsbuild/antsibull.log
+          path: ${{ steps.vars.outputs.checkout-path }}/docsbuild/antsibull.log
           name: antsibull-${{ github.sha }}.log
-          retention-days: 7
+          retention-days: 7 
