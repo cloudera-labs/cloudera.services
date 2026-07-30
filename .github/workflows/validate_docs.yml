@@ -18,15 +18,44 @@ name: Validate API Documentation
 
 on:
   pull_request:
-  push:
-    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
   validate-docs:
     name: Validate API documentation
-    uses: cloudera-labs/github-actions/.github/workflows/lint-ansible-docs.yml@v2
-    with:
-      antsibull-log-upload: true
-      collection-namespace: cloudera
-      collection-name: services
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure environment
+        id: vars
+        uses: actions/github-script@v9
+        with:
+          script: |
+            name = process.env.GITHUB_REPOSITORY.split('/')[1]
+            path = name.replace('.', '/')
+
+            core.exportVariable('ANSIBLE_COLLECTIONS_PATH', process.env.GITHUB_WORKSPACE)
+
+            const checkoutPath = `ansible_collections/${path}`
+            core.setOutput('checkout-path', checkoutPath)
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Hatch
+        run: pip install hatch
+
+      - name: Checkout project
+        uses: actions/checkout@v6
+        
+      - name: Render API documentation
+        run: hatch run docs:render
+
+      - name: Upload antsibull-doc log artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          path: docsbuild/antsibull.log
+          name: antsibull-${{ github.sha }}.log
+          retention-days: 7

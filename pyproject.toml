@@ -47,7 +47,7 @@ extra-dependencies = [
 [tool.hatch.envs.default.scripts]
 lint = [
   "pre-commit run -a",
-  "antsibull-docs lint-collection-docs --plugin-docs --validate-collection-refs=all --skip-rstcheck ."
+  # "antsibull-docs lint-collection-docs --plugin-docs --validate-collection-refs=all --skip-rstcheck ."
 ]
 
 [tool.hatch.envs.hatch-test]
@@ -62,7 +62,7 @@ extra-dependencies = [
 
 [tool.hatch.envs.hatch-test.scripts]
 run = [
-    "pytest{env:HATCH_TEST_ARGS:} {args}"
+  "pytest{env:HATCH_TEST_ARGS:} {args}"
 ]
 
 # Ansible 2.18 - Python >= 3.11
@@ -107,13 +107,35 @@ extra-dependencies = [
 ]
 
 [tool.hatch.envs.docs.scripts]
-build = "cd docsbuild; ./build.sh"
 changelog = [
   # Read the version in galaxy.yml via hatch itself (normalizes release candidates, etc.)
   # Use 'hatch version' to manage the version, i.e. 'hatch version major,rc'
   "antsibull-changelog release --version $(hatch version)",
   "antsichaut --repository cloudera-labs/cloudera.services --since_version=latest",
   "antsibull-changelog generate",
+]
+render = [
+  # Read and parse the collection docs into a temporary directory. Use for liniting.
+  "rm -rf docsbuild/build docsbuild/rst docsbuild/temp-rst",
+  "mkdir -m 0755 -p docsbuild/temp-rst",
+  """
+  antsibull-docs \
+    --config-file=docsbuild/antsibull-docs.cfg \
+    collection \
+    --use-current \
+    --squash-hierarchy \
+    --dest-dir docsbuild/temp-rst \
+    --fail-on-error \
+    cloudera.services
+  """,
+]
+build = [
+  # Build the docs into HTML. Use for local testing and CI.
+  "render",
+  "rm -rf docsbuild/rst",
+  "cp -av docsbuild/temp-rst docsbuild/rst",
+  "sphinx-build -M html docsbuild/rst docsbuild/build -c docsbuild -W --keep-going",
+  "cp docsbuild/cloudera.css docsbuild/build/html/_static/css",
 ]
 
 [tool.pytest.ini_options]
