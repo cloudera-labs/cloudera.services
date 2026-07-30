@@ -16,10 +16,6 @@ dependencies = [
   # Runtime dependencies of the collection. Keep in sync with requirements.txt.
   # NOTE: ansible-core is intentionally omitted here (it is the runtime platform,
   # provided by the execution environment)
-  "apache-atlas >=0.0.15",
-  "apache-ranger >=0.0.12",
-  "nipyapi >=1.5.0",
-  "kafka-python >=2.3.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -42,12 +38,12 @@ extra-dependencies = [
   "pytest-mock",
   "ansible-lint",
   "antsibull-docs >= 2.0.0, < 3.0.0",
+  "kafka-python >=2.3.0",
 ]
 
 [tool.hatch.envs.default.scripts]
 lint = [
   "pre-commit run -a",
-  # "antsibull-docs lint-collection-docs --plugin-docs --validate-collection-refs=all --skip-rstcheck ."
 ]
 
 [tool.hatch.envs.hatch-test]
@@ -58,6 +54,7 @@ extra-dependencies = [
   "molecule-plugins",
   "molecule-plugins[ec2]",
   # "ansible-core<2.17", # Handled by matrix overrides
+  "kafka-python >=2.3.0",
 ]
 
 [tool.hatch.envs.hatch-test.scripts]

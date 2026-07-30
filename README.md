@@ -5,15 +5,11 @@
 
 `cloudera.services` is an Ansible collection that lets you use and manage your **[Cloudera Data Platform (CDP)](https://www.cloudera.com/products/cloudera-data-platform.html) Public and Private Cloud** execution services and resources for both data and compute. With this collection, you can:
 
-* Create and manage [Shared Data Experience (SDX)](https://www.cloudera.com/products/cloudera-data-platform/sdx.html) assets, including:
-  * Manage Atlas groups and entities
-  * Manage Ranger roles and policies
 * Execute your [Cloudera Machine Learning (CML)](https://www.cloudera.com/products/machine-learning.html) projects and resources, including:
   * Run jobs
   * Build and deploy models
   * Install and run [Accelerators for ML Projects (AMPs)](https://cloudera.github.io/Applied-ML-Prototypes/#/)
   * Construct DataViz applications
-* Manage and orchestrate [Cloudera DataFlow (CDF)](https://www.cloudera.com/products/dataflow.html) NiFi flows
 * Manage and control [Cloudera Stream Processing (CSP)](https://www.cloudera.com/products/stream-processing.html) assets, including
   * Configure SQL Stream Builder (SSB) catalogs and data sources and run jobs
   * Create and manage Streams Messaging Manager (SSM) Kafka topics
@@ -103,7 +99,7 @@ Your local documentation will be found at `docsbuild/build/html`.
 You can also lint the documentation with the following command:
 
 ```bash
-hatch run lint
+hatch run docs:render
 ```
 
 ## Preparing a New Version
