@@ -14,27 +14,93 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name: Publish Documentation
+name: Publish API Documentation
 
 on:
   push:
     branches: [ "main" ]
-
   workflow_dispatch:
 
-jobs:
-  build-ansible-docs:
-    name: Build Ansible documentation
-    uses: cloudera-labs/github-actions/.github/workflows/construct-ansible-docs.yml@main
-    with:
-      pages-upload: true
-      directory-upload: true
-      antsibull-log-upload: true
+env:
+  HATCH_DATA_DIR: ~/.hatch
 
-  publish-ansible-docs:
+jobs:
+  build-docs:
+    name: Build API documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure Ansible collections path
+        id: vars
+        uses: actions/github-script@v9
+        with:
+          script: |
+            name = process.env.GITHUB_REPOSITORY.split('/')[1]
+            path = name.replace('.', '/')
+
+            core.exportVariable('ANSIBLE_COLLECTIONS_PATH', process.env.GITHUB_WORKSPACE)
+
+            const checkoutPath = `ansible_collections/${path}`
+            core.setOutput('checkout-path', checkoutPath)
+
+      - name: Checkout project into Ansible collections path
+        uses: actions/checkout@v6
+        with:
+          path: ${{ steps.vars.outputs.checkout-path }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Hatch
+        run: pip install hatch
+
+      - name: Cache Hatch virtual environments
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.HATCH_DATA_DIR }}
+          key: hatch-${{ runner.os }}-${{ hashFiles('**/pyproject.toml') }} # '**/hatch.lock' when hatch.lock is supported
+          restore-keys: |
+            hatch-${{ runner.os }}-
+
+      - name: Build API documentation
+        run: hatch run docs:build
+        working-directory: ${{ steps.vars.outputs.checkout-path }}
+
+      - name: Upload antsibull-doc log artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ steps.vars.outputs.checkout-path }}/antsibull.log
+          name: antsibull-${{ github.sha }}.log
+          retention-days: 7
+
+      - name: Fix permissions for Github Pages
+        run: |
+          chmod -c -R +rX "${{ steps.vars.outputs.checkout-path }}/docsbuild/build/html" | while read line; do
+            echo "::warning title=Invalid file permissions automatically fixed::$line"
+          done
+
+      - name: Upload Github Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ${{ steps.vars.outputs.checkout-path }}/docsbuild/build/html
+          name: github-pages
+          retention-days: 1
+
+
+  # build-ansible-docs:
+  #   name: Build Ansible documentation
+  #   uses: cloudera-labs/github-actions/.github/workflows/construct-ansible-docs.yml@main
+  #   with:
+  #     pages-upload: true
+  #     directory-upload: true
+  #     antsibull-log-upload: true
+
+  publish-docs:
     name: Publish Ansible documentation
     if: github.repository == 'cloudera-labs/cloudera.services'
-    needs: build-ansible-docs
+    needs: build-docs
     runs-on: ubuntu-latest
     permissions:
       pages: write
@@ -43,7 +109,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Deploy Github Pages
+      - name: Deploy to Github Pages
         id: deployment
         uses: actions/deploy-pages@v5
         with:

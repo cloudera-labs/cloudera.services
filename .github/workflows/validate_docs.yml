@@ -53,7 +53,7 @@ jobs:
 
       - name: Install Hatch
         run: pip install hatch
-     
+
       - name: Cache Hatch virtual environments
         uses: actions/cache@v6
         with:
@@ -72,4 +72,4 @@ jobs:
         with:
           path: ${{ steps.vars.outputs.checkout-path }}/antsibull.log
           name: antsibull-${{ github.sha }}.log
-          retention-days: 7 
+          retention-days: 7
