@@ -59,6 +59,8 @@ from ansible_collections.cloudera.services.plugins.module_utils.ssb import (
     SsbUserKeytabClient,
 )
 from ansible_collections.cloudera.services.plugins.module_utils.ranger import (
+    RangerPolicy,
+    RangerPolicyClient,
     RangerService,
     RangerServiceClient,
 )
@@ -1915,3 +1917,150 @@ def deletable_ranger_service(
     purge_ranger_service(service)
 
     yield service
+
+
+# ---------------------------------------------------------------------------
+# Ranger Policy Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def ranger_policy_client(ranger_rest_client) -> RangerPolicyClient:
+    """Fixture to create a RangerPolicyClient instance."""
+    return RangerPolicyClient(api_client=ranger_rest_client)
+
+
+def _policy_test_resource(suffix: str = "default") -> Dict[str, Any]:
+    """Resource block for test policies, matching the default ``tag`` service type.
+
+    Override the base tag value with RANGER_TEST_POLICY_TAG. If
+    RANGER_TEST_SERVICE_TYPE is set to something other than ``tag``, supply
+    matching resources in the test.
+
+    A unique ``suffix`` keeps each policy's resource distinct: Ranger rejects two
+    policies that share the same resource within a single service.
+    """
+    base_tag = os.environ.get("RANGER_TEST_POLICY_TAG", "ansible-test-tag")
+    return {"tag": {"values": [f"{base_tag}-{suffix}"]}}
+
+
+@pytest.fixture(scope="module")
+def ranger_policy_test_service(
+    request,
+    ranger_service_client,
+    ranger_service_type,
+) -> Generator[RangerService, None, None]:
+    """Create a module-scoped Ranger service to host test policies."""
+    service_name = f"ansible-test-policy-svc-{request.node.name.lower().rstrip('.py')}"
+
+    # Clean up any stale service with the same name.
+    stale = ranger_service_client.get_service_by_name(service_name)
+    if stale is not None:
+        ranger_service_client.delete_service_by_id(stale.id)
+
+    service = ranger_service_client.create_service(
+        RangerService(
+            name=service_name,
+            type=ranger_service_type,
+            description="Service hosting pytest policies",
+        ),
+    )
+
+    yield service
+
+    # Deleting the service removes any policies still attached to it.
+    try:
+        ranger_service_client.delete_service_by_id(service.id)
+    except Exception as e:
+        log.info(f"Failed to delete policy test service {service.id}: {str(e)}")
+
+
+@pytest.fixture
+def ranger_purge_policy(
+    ranger_policy_client,
+) -> Generator[Callable[[RangerPolicy], RangerPolicy], None, None]:
+    """Factory fixture to register policies for cleanup after the test."""
+    policy_ids: List[int] = []
+
+    def _register(policy: RangerPolicy) -> RangerPolicy:
+        if policy and getattr(policy, "id", None):
+            policy_ids.append(policy.id)
+        return policy
+
+    yield _register
+
+    # Clean up after the test.
+    for policy_id in policy_ids:
+        try:
+            ranger_policy_client.delete_policy_by_id(policy_id)
+        except Exception as e:
+            log.info(f"Failed to delete policy {policy_id} during cleanup: {str(e)}")
+
+
+@pytest.fixture(scope="module")
+def ranger_existing_policy(
+    request,
+    ranger_policy_client,
+    ranger_policy_test_service,
+) -> Generator[RangerPolicy, None, None]:
+    """Fixture to create a module-scoped test policy for read-only tests."""
+    node_name = request.node.name.lower().rstrip(".py")
+    policy_name = f"ansible-test-existing-policy-{node_name}"
+
+    # Clean up any stale policy with the same name.
+    stale = ranger_policy_client.get_policy_by_name(
+        service_name=ranger_policy_test_service.name,
+        policy_name=policy_name,
+    )
+    if stale is not None:
+        ranger_policy_client.delete_policy_by_id(stale.id)
+
+    policy = ranger_policy_client.create_policy(
+        RangerPolicy(
+            name=policy_name,
+            service=ranger_policy_test_service.name,
+            description="Existing policy created by pytest",
+            resources=_policy_test_resource(f"existing-{node_name}"),
+        ),
+    )
+
+    yield policy
+
+    # Clean up after the test (module scope, cannot use ranger_purge_policy fixture).
+    try:
+        ranger_policy_client.delete_policy_by_id(policy.id)
+    except Exception as e:
+        log.info(f"Failed to delete policy {policy.id} during cleanup: {str(e)}")
+
+
+@pytest.fixture
+def ranger_deletable_policy(
+    request,
+    ranger_policy_client,
+    ranger_policy_test_service,
+    ranger_purge_policy,
+) -> Generator[RangerPolicy, None, None]:
+    """Fixture to create a function-scoped test policy that can be modified or deleted."""
+    policy_name = f"ansible-test-deletable-policy-{request.node.name.lower()}"
+
+    # Clean up any stale policy with the same name.
+    stale = ranger_policy_client.get_policy_by_name(
+        service_name=ranger_policy_test_service.name,
+        policy_name=policy_name,
+    )
+    if stale is not None:
+        ranger_policy_client.delete_policy_by_id(stale.id)
+
+    policy = ranger_policy_client.create_policy(
+        RangerPolicy(
+            name=policy_name,
+            service=ranger_policy_test_service.name,
+            description="Deletable policy created by pytest - safe to delete",
+            resources=_policy_test_resource(f"deletable-{request.node.name.lower()}"),
+        ),
+    )
+
+    # Register for deletion after test.
+    ranger_purge_policy(policy)
+
+    yield policy
