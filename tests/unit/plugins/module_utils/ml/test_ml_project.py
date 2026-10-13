@@ -168,30 +168,40 @@ def test_update_project(mocker):
     )
 
 
-@pytest.mark.parametrize("operation", ["create_project", "update_project"])
 @pytest.mark.parametrize(
     "environment",
     [{"ENV1": "value1"}, {}, '{"ENV1":"value1"}', None],
 )
-def test_project_environment_payload(mocker, operation, environment):
+def test_create_project_environment_payload(mocker, environment):
     api_client = mocker.create_autospec(ServicesClient, instance=True)
     api_client.post.return_value = PROJECT
+    client = MlProjectClient(api_client=api_client)
+    project = MlProject(**PROJECT, environment=environment)
+
+    client.create_project(project)
+
+    payload = api_client.post.call_args.kwargs["data"]
+    expected = json.loads(environment) if isinstance(environment, str) else environment
+    assert payload["environment"] == expected
+    _, body = format_body(data=payload, headers={})
+    assert json.loads(body)["environment"] == expected
+    assert project.environment == environment
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [{"ENV1": "value1"}, {}, '{"ENV1":"value1"}', None],
+)
+def test_update_project_environment_payload(mocker, environment):
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
     api_client.patch.return_value = PROJECT
     client = MlProjectClient(api_client=api_client)
     project = MlProject(**PROJECT, environment=environment)
 
-    getattr(client, operation)(project)
+    client.update_project(project)
 
-    method = api_client.post if operation == "create_project" else api_client.patch
-    payload = method.call_args.kwargs["data"]
-    if operation == "create_project":
-        expected = (
-            json.loads(environment) if isinstance(environment, str) else environment
-        )
-    else:
-        expected = (
-            json.dumps(environment) if isinstance(environment, dict) else environment
-        )
+    payload = api_client.patch.call_args.kwargs["data"]
+    expected = json.dumps(environment) if isinstance(environment, dict) else environment
     assert payload["environment"] == expected
     _, body = format_body(data=payload, headers={})
     assert json.loads(body)["environment"] == expected
