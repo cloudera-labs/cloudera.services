@@ -127,7 +127,7 @@ attributes:
 EXAMPLES = r"""
 # NOTE: Examples do not include connection and authentication fields
 
-- name: Create a Ranger role
+- name: Create a Ranger role with users and groups
   cloudera.services.ranger_role:
     name: "test_role"
     description: "A test role"
@@ -137,6 +137,43 @@ EXAMPLES = r"""
       - name: "alice"
     groups:
       - name: "data_engineers"
+
+- name: Create a Ranger role with nested roles
+  cloudera.services.ranger_role:
+    name: "parent_role"
+    description: "A role containing other roles"
+    roles:
+      - name: "viewer_role"
+        is_admin: false
+      - name: "editor_role"
+        is_admin: true
+
+- name: Create a Ranger role and auto-create non-existent users
+  cloudera.services.ranger_role:
+    name: "new_role"
+    description: "Create non-existent users automatically"
+    users:
+      - name: "bob"
+        is_admin: false
+      - name: "charlie"
+        is_admin: false
+    create_non_exist_user_group: true
+
+- name: Create a Ranger role and auto-create non-existent users and groups
+  cloudera.services.ranger_role:
+    name: "comprehensive_role"
+    description: "Create non-existent users and groups automatically"
+    users:
+      - name: "dave"
+        is_admin: true
+      - name: "john"
+        is_admin: false
+    groups:
+      - name: "analytics_team"
+        is_admin: false
+      - name: "security_team"
+        is_admin: true
+    create_non_exist_user_group: true
 
 - name: Delete a Ranger role
   cloudera.services.ranger_role:
