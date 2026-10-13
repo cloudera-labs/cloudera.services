@@ -18,9 +18,14 @@ from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
 
+import json
+
+import pytest
+
 from ansible_collections.cloudera.services.plugins.module_utils.common import (
     from_dict,
     to_dict,
+    format_body,
     ServicesClient,
 )
 from ansible_collections.cloudera.services.plugins.module_utils.ml import (
@@ -138,17 +143,59 @@ def test_update_project(mocker):
 
     client = MlProjectClient(api_client=api_client)
     client.update_project(
-        MlProject(name="test-project", id="aaaa-bbbb-cccc-dddd", description="New"),
+        MlProject(
+            name="test-project",
+            id="aaaa-bbbb-cccc-dddd",
+            description="New",
+            environment={"PROJECT_OWNER": "test-user"},
+            creator={"username": "test-user"},
+            created_at="2026-10-13T10:27:27Z",
+            updated_at="2026-10-13T10:27:28Z",
+            default_project_engine_type="ml_runtime",
+            template="blank",
+            git_url="https://example.com/project.git",
+            git_ref="main",
+        ),
     )
 
     api_client.patch.assert_called_once_with(
         f"/{API_VERSION}/projects/aaaa-bbbb-cccc-dddd",
         data={
             "name": "test-project",
-            "id": "aaaa-bbbb-cccc-dddd",
             "description": "New",
+            "environment": json.dumps({"PROJECT_OWNER": "test-user"}),
         },
     )
+
+
+@pytest.mark.parametrize("operation", ["create_project", "update_project"])
+@pytest.mark.parametrize(
+    "environment",
+    [{"ENV1": "value1"}, {}, '{"ENV1":"value1"}', None],
+)
+def test_project_environment_payload(mocker, operation, environment):
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.post.return_value = PROJECT
+    api_client.patch.return_value = PROJECT
+    client = MlProjectClient(api_client=api_client)
+    project = MlProject(**PROJECT, environment=environment)
+
+    getattr(client, operation)(project)
+
+    method = api_client.post if operation == "create_project" else api_client.patch
+    payload = method.call_args.kwargs["data"]
+    if operation == "create_project":
+        expected = (
+            json.loads(environment) if isinstance(environment, str) else environment
+        )
+    else:
+        expected = (
+            json.dumps(environment) if isinstance(environment, dict) else environment
+        )
+    assert payload["environment"] == expected
+    _, body = format_body(data=payload, headers={})
+    assert json.loads(body)["environment"] == expected
+    assert project.environment == environment
 
 
 def test_delete_project(mocker):

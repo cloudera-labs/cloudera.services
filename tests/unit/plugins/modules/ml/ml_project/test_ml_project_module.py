@@ -105,6 +105,47 @@ def test_present_noop(module_args, mocker):
     mock_update.assert_not_called()
 
 
+@pytest.mark.parametrize(
+    "environment",
+    [{"ENV1": "value1", "EXTRA": "keep"}, '{"EXTRA":"keep","ENV1":"value1"}'],
+)
+def test_environment_noop(module_args, mocker, environment):
+    existing = MlProject(
+        id=EXISTING.id,
+        name=EXISTING.name,
+        environment=environment,
+    )
+    mocker.patch(f"{CLIENT}.list_projects", return_value=[existing])
+    mock_update = mocker.patch(f"{CLIENT}.update_project")
+    module_args(
+        _creds({"name": existing.name, "environment_variables": {"ENV1": "value1"}}),
+    )
+
+    with pytest.raises(AnsibleExitJson) as result:
+        ml_project.main()
+
+    assert result.value["changed"] is False
+    mock_update.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [{"ENV1": "old", "EXTRA": "keep"}, '{"ENV1":"old","EXTRA":"keep"}'],
+)
+def test_environment_update_merges(module_args, mocker, environment):
+    existing = MlProject(id=EXISTING.id, name=EXISTING.name, environment=environment)
+    mocker.patch(f"{CLIENT}.list_projects", return_value=[existing])
+    mock_update = mocker.patch(f"{CLIENT}.update_project", return_value=existing)
+    module_args(_creds({"name": existing.name, "env": {"ENV1": "new"}}))
+
+    with pytest.raises(AnsibleExitJson) as result:
+        ml_project.main()
+
+    assert result.value["changed"] is True
+    assert mock_update.call_args.args[0].environment == {"ENV1": "new", "EXTRA": "keep"}
+    assert existing.environment == environment
+
+
 def test_update_description(module_args, mocker):
     mocker.patch(f"{CLIENT}.list_projects", return_value=[EXISTING])
     mock_update = mocker.patch(
