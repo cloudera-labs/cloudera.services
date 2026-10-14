@@ -97,11 +97,13 @@ options:
           - Whether the nested role has administrative privileges over the role.
         type: bool
         default: false
-  create_non_exist_user_group:
+  ensure_members_exist:
     description:
       - Whether to create users or groups referenced by the role that do not yet exist.
     type: bool
     default: false
+    aliases:
+      - create_non_exist_user_group
   state:
     description:
       - Whether the role should be present or absent.
@@ -157,7 +159,7 @@ EXAMPLES = r"""
         is_admin: false
       - name: "charlie"
         is_admin: false
-    create_non_exist_user_group: true
+    ensure_members_exist: true
 
 - name: Create a Ranger role and auto-create non-existent users and groups
   cloudera.services.ranger_role:
@@ -173,7 +175,7 @@ EXAMPLES = r"""
         is_admin: false
       - name: "security_team"
         is_admin: true
-    create_non_exist_user_group: true
+    ensure_members_exist: true
 
 - name: Delete a Ranger role
   cloudera.services.ranger_role:
@@ -321,10 +323,11 @@ class RangerRoleModule(ServicesModule):
         super().__init__(
             argument_spec=dict(
                 **RangerRole.argument_spec(),
-                create_non_exist_user_group=dict(
+                ensure_members_exist=dict(
                     type="bool",
                     required=False,
                     default=False,
+                    aliases=["create_non_exist_user_group"],
                 ),
                 state=dict(
                     type="str",
@@ -343,7 +346,7 @@ class RangerRoleModule(ServicesModule):
         self.users = self.get_param("users")
         self.groups = self.get_param("groups")
         self.roles = self.get_param("roles")
-        self.create_non_exist_user_group = self.get_param("create_non_exist_user_group")
+        self.ensure_members_exist = self.get_param("ensure_members_exist")
         self.state = self.get_param("state")
 
         # Initialize result variables
@@ -383,7 +386,7 @@ class RangerRoleModule(ServicesModule):
                 if not self.module.check_mode:
                     self.role = client.create_role(
                         incoming,
-                        create_non_exist_user_group=self.create_non_exist_user_group,
+                        create_non_exist_user_group=self.ensure_members_exist,
                     )
                 else:
                     self.role = incoming
@@ -409,7 +412,7 @@ class RangerRoleModule(ServicesModule):
                     if not self.module.check_mode:
                         self.role = client.update_role(
                             incoming,
-                            create_non_exist_user_group=self.create_non_exist_user_group,
+                            create_non_exist_user_group=self.ensure_members_exist,
                         )
                     else:
                         self.role = incoming
