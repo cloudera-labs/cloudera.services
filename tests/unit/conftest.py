@@ -61,6 +61,9 @@ from ansible_collections.cloudera.services.plugins.module_utils.ssb import (
 from ansible_collections.cloudera.services.plugins.module_utils.ranger import (
     RangerPolicy,
     RangerPolicyClient,
+    RangerRole,
+    RangerRoleClient,
+    RangerRoleMember,
     RangerService,
     RangerServiceClient,
 )
@@ -2064,3 +2067,97 @@ def ranger_deletable_policy(
     ranger_purge_policy(policy)
 
     yield policy
+
+
+# ---------------------------------------------------------------------------
+# Ranger Role Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def ranger_role_client(ranger_rest_client) -> RangerRoleClient:
+    """Fixture to create a RangerRoleClient instance."""
+    return RangerRoleClient(api_client=ranger_rest_client)
+
+
+@pytest.fixture
+def ranger_purge_role(
+    ranger_role_client,
+) -> Generator[Callable[[RangerRole], RangerRole], None, None]:
+    """Factory fixture to register roles for cleanup after the test."""
+    role_ids: List[int] = []
+
+    def _register(role: RangerRole) -> RangerRole:
+        if role and getattr(role, "id", None):
+            role_ids.append(role.id)
+        return role
+
+    yield _register
+
+    # Clean up after the test.
+    for role_id in role_ids:
+        try:
+            ranger_role_client.delete_role_by_id(role_id)
+        except Exception as e:
+            log.info(f"Failed to delete role {role_id} during cleanup: {str(e)}")
+
+
+@pytest.fixture(scope="module")
+def ranger_existing_role(
+    request,
+    ranger_role_client,
+) -> Generator[RangerRole, None, None]:
+    """Fixture to create a module-scoped test role for read-only tests."""
+    role_name = f"ansible-test-existing-role-{request.node.name.lower().rstrip('.py')}"
+
+    # Clean up any stale role with the same name.
+    stale = ranger_role_client.get_role_by_name(role_name)
+    if stale is not None:
+        ranger_role_client.delete_role_by_id(stale.id)
+
+    role = ranger_role_client.create_role(
+        RangerRole(
+            name=role_name,
+            description="Existing role created by pytest",
+            users=[
+                RangerRoleMember(name=os.environ["RANGER_API_USERNAME"], is_admin=True),
+            ],
+        ),
+    )
+
+    yield role
+
+    try:
+        ranger_role_client.delete_role_by_id(role.id)
+    except Exception as e:
+        log.info(f"Failed to delete role {role.id} during cleanup: {str(e)}")
+
+
+@pytest.fixture
+def ranger_deletable_role(
+    request,
+    ranger_role_client,
+    ranger_purge_role,
+) -> Generator[RangerRole, None, None]:
+    """Fixture to create a function-scoped test role that can be modified or deleted."""
+    role_name = f"ansible-test-deletable-role-{request.node.name.lower()}"
+
+    # Clean up any stale role with the same name.
+    stale = ranger_role_client.get_role_by_name(role_name)
+    if stale is not None:
+        ranger_role_client.delete_role_by_id(stale.id)
+
+    role = ranger_role_client.create_role(
+        RangerRole(
+            name=role_name,
+            description="Deletable role created by pytest - safe to delete",
+            users=[
+                RangerRoleMember(name=os.environ["RANGER_API_USERNAME"], is_admin=True),
+            ],
+        ),
+    )
+
+    # Register for deletion after test.
+    ranger_purge_role(role)
+
+    yield role

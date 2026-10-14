@@ -813,3 +813,201 @@ def _consolidate_policy_items(items: List[Dict]) -> List[Dict]:
                         consolidated[key][field] = existing_values + new_values
 
     return list(consolidated.values())
+
+
+@dataclass
+class RangerRoleMember:
+    """A user, group, or role member entry within a RangerRole."""
+
+    name: str
+    is_admin: Union[bool, None, NULLABLE] = NULLABLE
+
+    @classmethod
+    def argument_spec(cls) -> Dict[str, Any]:
+        """Return the argument spec for Ansible module parameters."""
+        return dict(
+            name=dict(type="str", required=True),
+            is_admin=dict(type="bool", required=False, default=False),
+        )
+
+
+@dataclass
+class RangerRole:
+    """Representation of an Apache Ranger role."""
+
+    # Mutable - required when creating a role
+    name: str
+
+    # Mutable - optional
+    description: Union[str, None, NULLABLE] = NULLABLE
+    is_enabled: Union[bool, None, NULLABLE] = NULLABLE
+    options: Union[Dict[str, Any], None, NULLABLE] = NULLABLE
+    users: Union[List[RangerRoleMember], None, NULLABLE] = NULLABLE
+    groups: Union[List[RangerRoleMember], None, NULLABLE] = NULLABLE
+    roles: Union[List[RangerRoleMember], None, NULLABLE] = NULLABLE
+
+    # Read-only (set by Ranger)
+    id: Union[int, None, NULLABLE] = NULLABLE
+    guid: Union[str, None, NULLABLE] = NULLABLE
+    version: Union[int, None, NULLABLE] = NULLABLE
+    create_time: Union[int, None, NULLABLE] = NULLABLE
+    update_time: Union[int, None, NULLABLE] = NULLABLE
+    created_by: Union[str, None, NULLABLE] = NULLABLE
+    updated_by: Union[str, None, NULLABLE] = NULLABLE
+    created_by_user: Union[str, None, NULLABLE] = NULLABLE
+
+    @classmethod
+    def argument_spec(cls) -> Dict[str, Any]:
+        """Return the Ansible argument spec for the mutable RangerRole parameters."""
+        return dict(
+            name=dict(type="str", required=False),
+            description=dict(type="str", required=False),
+            is_enabled=dict(
+                type="bool",
+                required=False,
+                default=True,
+                aliases=["enabled"],
+            ),
+            options=dict(type="dict", required=False),
+            users=dict(
+                type="list",
+                elements="dict",
+                required=False,
+                options=RangerRoleMember.argument_spec(),
+            ),
+            groups=dict(
+                type="list",
+                elements="dict",
+                required=False,
+                options=RangerRoleMember.argument_spec(),
+            ),
+            roles=dict(
+                type="list",
+                elements="dict",
+                required=False,
+                options=RangerRoleMember.argument_spec(),
+            ),
+        )
+
+
+class RangerRoleClient:
+    """Apache Ranger Role API client."""
+
+    def __init__(self, api_client: ServicesClient) -> None:
+        self.api_client: ServicesClient = api_client
+
+    def list_roles(self) -> List[RangerRole]:
+        """List all roles."""
+        result = self.api_client.get(
+            "/service/roles/roles",
+            squelch={404: {"roles": []}},
+        )
+        roles_raw = result.get("roles", []) if result else []
+        return [
+            from_dict(RangerRole, camel_dict_to_snake_dict(r, reversible=True))
+            for r in roles_raw
+        ]
+
+    def get_role_by_id(self, role_id: int) -> Optional[RangerRole]:
+        """Retrieve a single role by id, or None if not found."""
+        result = self.api_client.get(
+            f"/service/roles/roles/{role_id}",
+            squelch={404: None},
+            passthru=[400],
+        )
+
+        # Ranger answers an unknown role id with an empty 200 response.
+        if not result or _is_ranger_not_found(result):
+            return None
+
+        if isinstance(result, dict) and result.get("status") == 400:
+            raise ServicesError(
+                f"HTTP 400 Error retrieving role {role_id}",
+                status=400,
+            )
+
+        return from_dict(RangerRole, camel_dict_to_snake_dict(result, reversible=True))
+
+    def get_role_by_name(self, role_name: str) -> Optional[RangerRole]:
+        """Retrieve a single role by name, or None if not found."""
+        names = self.api_client.get(
+            "/service/roles/roles/names",
+            squelch={404: []},
+        )
+        if not names or role_name not in names:
+            return None
+
+        result = self.api_client.get(
+            f"/service/roles/roles/name/{role_name}",
+            squelch={404: None},
+            passthru=[400],
+        )
+
+        if not result or _is_ranger_not_found(result):
+            return None
+
+        if isinstance(result, dict) and result.get("status") == 400:
+            raise ServicesError(
+                f"HTTP 400 Error retrieving role '{role_name}'",
+                status=400,
+            )
+
+        return from_dict(RangerRole, camel_dict_to_snake_dict(result, reversible=True))
+
+    def create_role(
+        self,
+        role: RangerRole,
+        create_non_exist_user_group: bool = False,
+    ) -> RangerRole:
+        """Create a new role."""
+        result = self.api_client.post(
+            "/service/roles/roles",
+            params={"createNonExistUserGroup": create_non_exist_user_group},
+            data=snake_dict_to_camel_dict(to_dict(role)),
+        )
+        return from_dict(RangerRole, camel_dict_to_snake_dict(result, reversible=True))
+
+    def update_role(
+        self,
+        role: RangerRole,
+        create_non_exist_user_group: bool = False,
+    ) -> RangerRole:
+        """Update an existing role by its id."""
+        if role.id is NULLABLE or role.id is None:
+            raise ValueError("Cannot update a role without an id.")
+        result = self.api_client.put(
+            f"/service/roles/roles/{role.id}",
+            params={"createNonExistUserGroup": create_non_exist_user_group},
+            data=snake_dict_to_camel_dict(to_dict(role)),
+        )
+        return from_dict(RangerRole, camel_dict_to_snake_dict(result, reversible=True))
+
+    def delete_role_by_id(self, role_id: int) -> None:
+        """Delete a role by id (idempotent)."""
+        result = self.api_client.delete(
+            f"/service/roles/roles/{role_id}",
+            squelch={404: None},
+            passthru=[400],
+        )
+
+        if _is_ranger_not_found(result):
+            return None
+
+        if isinstance(result, dict) and result.get("status") == 400:
+            raise ServicesError(
+                f"HTTP 400 Error deleting role {role_id}",
+                status=400,
+            )
+
+
+def extract_role_params(module_instance) -> Dict[str, Any]:
+    """Extract the mutable role parameters from a module instance into a dict."""
+    return {
+        "name": getattr(module_instance, "name", None),
+        "description": getattr(module_instance, "description", None),
+        "is_enabled": getattr(module_instance, "is_enabled", None),
+        "options": getattr(module_instance, "options", None),
+        "users": getattr(module_instance, "users", None),
+        "groups": getattr(module_instance, "groups", None),
+        "roles": getattr(module_instance, "roles", None),
+    }
