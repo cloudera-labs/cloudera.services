@@ -30,6 +30,7 @@ operate against a ``ServicesClient``. CML authenticates with a bearer token
   every ``ml_*`` module.
 """
 
+import json
 import re
 
 from dataclasses import dataclass
@@ -176,18 +177,38 @@ class MlProjectClient:
 
     def create_project(self, project: MlProject) -> MlProject:
         """Create a project."""
+        payload = to_dict(project)
+        if isinstance(project.environment, str):
+            payload["environment"] = json.loads(project.environment)
         return from_dict(
             MlProject,
-            self.api_client.post(f"/{API_VERSION}/projects", data=to_dict(project)),
+            self.api_client.post(f"/{API_VERSION}/projects", data=payload),
         )
 
     def update_project(self, project: MlProject) -> MlProject:
-        """Update a project (PATCH). ``project.id`` must be set."""
+        """Update a project; PATCH requires a JSON-string environment and a set id."""
+        writable_fields = {
+            "name",
+            "description",
+            "visibility",
+            "environment",
+            "organization_permission",
+            "parent_project",
+            "shared_memory_limit",
+            "default_engine_type",
+        }
+        payload = {
+            key: value
+            for key, value in to_dict(project).items()
+            if key in writable_fields
+        }
+        if isinstance(project.environment, dict):
+            payload["environment"] = json.dumps(project.environment)
         return from_dict(
             MlProject,
             self.api_client.patch(
                 f"/{API_VERSION}/projects/{project.id}",
-                data=to_dict(project),
+                data=payload,
             ),
         )
 

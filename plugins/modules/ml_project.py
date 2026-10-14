@@ -375,7 +375,8 @@ class MlProjectModule(MlServicesModule):
                 current = {}
         if not isinstance(current, dict):
             current = {}
-        return {**current, **self.env}
+        merged = {**current, **self.env}
+        return existing.environment if merged == current else merged
 
     def process(self) -> None:
         client = MlProjectClient(self.api_client)

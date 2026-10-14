@@ -18,6 +18,8 @@ from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
 
+import json
+
 import pytest
 
 from typing import Callable
@@ -91,6 +93,59 @@ def test_ml_project_module_create_with_description(
     assert result["changed"] is True
     assert result["project"]["name"] == project_name
     assert result["project"]["description"] == description
+
+
+def test_ml_project_module_create_envvars_idempotent(
+    request,
+    module_args,
+    ml_project_client,
+    purge_ml_project,
+):
+    """Create a blank project with envvars and reapply its full configuration unchanged."""
+    project_name = request.node.name
+    description = "Project " + project_name
+    environment = {
+        "ENV1": "value1",
+        "ENV2": "value2",
+    }
+
+    args = {
+        "name": project_name,
+        "desc": description,
+        "runtime": "ml_runtime",
+        "template": "blank",
+        "visibility": "private",
+        "environment_variables": environment,
+    }
+    module_args(args)
+
+    with pytest.raises(AnsibleExitJson) as created:
+        ml_project.main()
+
+    result = created.value
+    project = purge_ml_project(from_dict(MlProject, result["project"]))
+    assert result["changed"] is True
+    assert isinstance(project.id, str)
+
+    persisted = ml_project_client.describe_project(project.id)
+    assert persisted is not None
+    assert persisted.name == project_name
+    assert persisted.description == description
+    assert persisted.visibility == "private"
+    assert persisted.default_engine_type == "ml_runtime"
+    persisted_environment = persisted.environment
+    if isinstance(persisted_environment, str):
+        persisted_environment = json.loads(persisted_environment)
+    assert isinstance(persisted_environment, dict)
+    assert environment.items() <= persisted_environment.items()
+
+    module_args(args)
+
+    with pytest.raises(AnsibleExitJson) as repeated:
+        ml_project.main()
+
+    assert repeated.value["changed"] is False
+    assert repeated.value["project"]["id"] == project.id
 
 
 def test_ml_project_module_present_idempotent(ml_module_args, existing_ml_project):
