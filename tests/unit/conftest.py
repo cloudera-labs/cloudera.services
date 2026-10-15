@@ -63,6 +63,7 @@ from ansible_collections.cloudera.services.plugins.module_utils.ssb import (
 from ansible_collections.cloudera.services.plugins.module_utils.atlas import (
     AtlasAttributeDef,
     AtlasClassificationDef,
+    AtlasEntityDef,
     AtlasEnumDef,
     AtlasEnumElementDef,
     AtlasTypeDefClient,
@@ -2332,3 +2333,27 @@ def atlas_deletable_classification_def(
     atlas_purge_typedef(name)
 
     yield classification_def
+
+
+@pytest.fixture
+def atlas_deletable_entity_def(
+    request,
+    atlas_typedef_client,
+    atlas_purge_typedef,
+) -> Generator[AtlasEntityDef, None, None]:
+    """Fixture to create a function-scoped test entity typedef that can be modified or deleted."""
+    name = _atlas_type_name("deletable", request.node.name)
+
+    atlas_typedef_client.delete_typedef_by_name(name)
+
+    entity_def = atlas_typedef_client.create_entity_def(
+        AtlasEntityDef(
+            name=name,
+            description="Deletable entity created by pytest - safe to delete",
+            attribute_defs=[AtlasAttributeDef(name="level", type_name="string")],
+        ),
+    )
+
+    atlas_purge_typedef(name)
+
+    yield entity_def
