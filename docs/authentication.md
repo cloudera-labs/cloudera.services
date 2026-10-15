@@ -55,3 +55,8 @@ Reference implementation: `plugins/module_utils/ml.py` (`ml_project` is migrated
 - `endpoint` + `username` + `password`
 - Uses `apache-ranger` Python client
 - Legacy, migrate to modern architecture
+
+**Atlas modules (CDP Base):**
+- Standard `cloudera.services.services_client` fragment: `url` (alias `endpoint`) + `url_username`/`url_password` (basic), `use_gssapi` (SPNEGO), or client certificate
+- `url` is the server root; the client appends `/api/atlas/v2/types`. Direct Atlas (`https://host:31443`) and Knox (`https://host/gateway/cdp-proxy-api/atlas`) both work
+- No Atlas-specific auth code (`AtlasTypeDefClient` in `module_utils/atlas.py` takes any `ServicesClient`)
