@@ -22,8 +22,10 @@ import json
 import logging
 import os
 import pytest
+import re
 import sys
 import time
+import warnings
 
 from http.cookiejar import CookieJar
 from kafka import KafkaAdminClient, KafkaProducer
@@ -57,6 +59,11 @@ from ansible_collections.cloudera.services.plugins.module_utils.ssb import (
     SsbUdfClient,
     SsbUserClient,
     SsbUserKeytabClient,
+)
+from ansible_collections.cloudera.services.plugins.module_utils.atlas import (
+    AtlasEnumDef,
+    AtlasEnumElementDef,
+    AtlasTypeDefClient,
 )
 from ansible_collections.cloudera.services.plugins.module_utils.ranger import (
     RangerPolicy,
@@ -2161,3 +2168,141 @@ def ranger_deletable_role(
     ranger_purge_role(role)
 
     yield role
+
+
+# ---------------------------------------------------------------------------
+# Atlas Fixtures
+# ---------------------------------------------------------------------------
+
+
+def _atlas_type_name(prefix: str, raw: str) -> str:
+    """Build an Atlas-safe type name (letters, digits, underscores)."""
+    return f"ansible_test_{prefix}_{re.sub(r'[^a-z0-9]+', '_', raw.lower()).strip('_')}"
+
+
+@pytest.fixture(scope="module")
+def atlas_rest_client(request, module_mocker) -> AnsibleServicesClient:
+    """
+    Fixture to create an AnsibleServicesClient instance for the Atlas endpoint.
+    This fixture's Ansible module is used for set up and teardown of Atlas test
+    resources (module-scope).
+
+    It checks for the following required environment variables set at the module
+    and skips tests if any are missing:
+    - ATLAS_API_URL
+    - ATLAS_API_USERNAME
+    - ATLAS_API_PASSWORD
+    """
+    required_vars = getattr(request.module, "REQUIRED_ENV_VARS", [])
+    missing = [var for var in required_vars if var not in os.environ]
+    if missing:
+        pytest.skip(f"Missing env vars: {', '.join(missing)}")
+
+    module = module_mocker.Mock()
+    module.params = {}
+    module.fail_json = module_mocker.Mock(
+        side_effect=AnsibleFailJson({"msg": "fail_json called"}),
+    )
+    module.exit_json = module_mocker.Mock(
+        side_effect=AnsibleExitJson({"msg": "exit_json called"}),
+    )
+
+    module.params.update(
+        {
+            "url": os.environ["ATLAS_API_URL"],
+            "url_username": os.environ["ATLAS_API_USERNAME"],
+            "url_password": os.environ["ATLAS_API_PASSWORD"],
+            "validate_certs": os.environ.get("ATLAS_VALIDATE_CERTS", "false").lower()
+            == "true",
+        },
+    )
+
+    return AnsibleServicesClient(
+        module=module,
+        cookies=CookieJar(),
+    )
+
+
+@pytest.fixture(scope="module")
+def atlas_typedef_client(atlas_rest_client) -> AtlasTypeDefClient:
+    """Fixture to create an AtlasTypeDefClient instance."""
+    return AtlasTypeDefClient(api_client=atlas_rest_client)
+
+
+@pytest.fixture
+def atlas_purge_typedef(
+    atlas_typedef_client,
+) -> Generator[Callable[[str], str], None, None]:
+    """Factory fixture to register typedef names for cleanup after the test."""
+    names: List[str] = []
+
+    def _register(name: str) -> str:
+        names.append(name)
+        return name
+
+    yield _register
+
+    for name in names:
+        try:
+            atlas_typedef_client.delete_typedef_by_name(name)
+        except Exception as e:
+            warnings.warn(
+                f"Failed to delete typedef {name} during cleanup: {str(e)}",
+                RuntimeWarning,
+            )
+
+
+@pytest.fixture(scope="module")
+def atlas_existing_enum_def(
+    request,
+    atlas_typedef_client,
+) -> Generator[AtlasEnumDef, None, None]:
+    """Fixture to create a module-scoped test enum typedef for read-only tests."""
+    name = _atlas_type_name("existing", request.node.name)
+
+    atlas_typedef_client.delete_typedef_by_name(name)
+
+    enum_def = atlas_typedef_client.create_enum_def(
+        AtlasEnumDef(
+            name=name,
+            description="Existing enum created by pytest",
+            element_defs=[
+                AtlasEnumElementDef(value="RED"),
+                AtlasEnumElementDef(value="GREEN"),
+            ],
+        ),
+    )
+
+    yield enum_def
+
+    try:
+        atlas_typedef_client.delete_typedef_by_name(name)
+    except Exception as e:
+        warnings.warn(
+            f"Failed to delete typedef {name} during cleanup: {str(e)}",
+            RuntimeWarning,
+        )
+
+
+@pytest.fixture
+def atlas_deletable_enum_def(
+    request,
+    atlas_typedef_client,
+    atlas_purge_typedef,
+) -> Generator[AtlasEnumDef, None, None]:
+    """Fixture to create a function-scoped test enum typedef that can be modified or deleted."""
+    name = _atlas_type_name("deletable", request.node.name)
+
+    atlas_typedef_client.delete_typedef_by_name(name)
+
+    enum_def = atlas_typedef_client.create_enum_def(
+        AtlasEnumDef(
+            name=name,
+            description="Deletable enum created by pytest - safe to delete",
+            element_defs=[AtlasEnumElementDef(value="RED")],
+        ),
+    )
+
+    atlas_purge_typedef(name)
+
+    yield enum_def
