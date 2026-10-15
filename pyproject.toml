@@ -28,6 +28,8 @@ scheme = "semver"
 validate-bump = true
 
 [tool.hatch.envs.default]
+# ansible-core<2.17 breaks on Python 3.14 (ssl.PROTOCOL_TLSv1 was removed)
+python = "3.12"
 # The project is installed (dev mode) so its runtime dependencies from
 # [project.dependencies] are pulled in automatically -- keeping that table the
 # single source of truth. Utility dependencies below live only in Hatch envs.
@@ -152,6 +154,13 @@ markers = [
 addopts = [
   "-m not slow and not data_service", # skip slow and data_service-dependent tests by default
 ]
+
+[tool.ruff.lint]
+# Formatting is owned by black (pre-commit). Pin ruff to the classic
+# pycodestyle/pyflakes baseline so newer ruff default rule sets (pyupgrade,
+# isort, bugbear, ...) do not flag the collection's Ansible boilerplate
+# (e.g. `__metaclass__ = type`, `# -*- coding: utf-8 -*-`).
+select = ["E4", "E7", "E9", "F"]
 
 [tool.ruff.lint.per-file-ignores]
 # Ansible modules must define the DOCUMENTATION, EXAMPLES, and RETURN string
