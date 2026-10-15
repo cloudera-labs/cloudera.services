@@ -164,10 +164,13 @@ extends_documentation_fragment:
   - cloudera.services.services_client
 attributes:
   check_mode:
+    description:
+      - This module supports check mode.
     support: full
   diff_mode:
+    description:
+      - This module supports diff mode.
     support: full
-    platforms: all
 """
 
 EXAMPLES = r"""
