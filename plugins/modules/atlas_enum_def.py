@@ -193,7 +193,7 @@ class AtlasEnumDefModule(ServicesModule):
                 ),
             ),
             required_if=[
-                ["state", "present", ["name"]]
+                ["state", "present", ["name"]],
             ],
             supports_check_mode=True,
         )
@@ -207,7 +207,7 @@ class AtlasEnumDefModule(ServicesModule):
         self.options: Optional[Dict[str, Any]] = self.get_param("options")
         self.default_value: Optional[str] = self.get_param("default_value")
         self.element_defs: Optional[List[Dict[str, Any]]] = self.get_param(
-            "element_defs"
+            "element_defs",
         )
         self.state: str = self.get_param("state")
 
@@ -257,7 +257,8 @@ class AtlasEnumDefModule(ServicesModule):
                 )
 
                 if isinstance(incoming.element_defs, list) and isinstance(
-                    existing.element_defs, list
+                    existing.element_defs,
+                    list,
                 ):
                     incoming.element_defs = align_enum_elements(
                         incoming.element_defs,
