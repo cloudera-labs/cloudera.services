@@ -58,7 +58,8 @@ def test_get_classification_def_by_name_not_found(atlas_typedef_client):
 
 
 def test_update_classification_def(
-    atlas_typedef_client, atlas_deletable_classification_def
+    atlas_typedef_client,
+    atlas_deletable_classification_def,
 ):
     """Test updating a classification typedef description."""
     updated = atlas_typedef_client.update_classification_def(
