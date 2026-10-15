@@ -1660,6 +1660,8 @@ class ServicesModule(abc.ABC, metaclass=AutoExecuteMeta):
         try:
             # Call the abstract process method
             self.process()
+        except ServicesError as e:
+            self.module.fail_json(msg=str(e))
         finally:
             # Restore stdout and stderr if they were redirected
             if self.debug_log and self.original_stdout:
