@@ -24,6 +24,13 @@ _For Apache Ranger_
 - `RANGER_API_USERNAME`
 - `RANGER_API_PASSWORD`
 
+_For Apache Atlas_
+
+- `ATLAS_API_URL`
+- `ATLAS_API_USERNAME`
+- `ATLAS_API_PASSWORD`
+- `ATLAS_VALIDATE_CERTS` (optional, default `false`)
+
 _For Cloudera AI_
 
 - `CML_ENDPOINT`
