@@ -31,12 +31,16 @@ from ansible_collections.cloudera.services.plugins.module_utils.common import (
     to_dict,
     NULLABLE,
     ServicesClient,
+    ServicesError,
 )
 
 TYPES_API = "/api/atlas/v2/types"
 
 # Free-form maps whose keys must never be case-converted.
 VERBATIM_KEYS = ("options", "params")
+
+# Maps keyed by user-chosen names: the map keys stay verbatim, the values are converted.
+VERBATIM_MAP_KEYS = ("business_attribute_defs", "businessAttributeDefs")
 
 
 @dataclass
@@ -216,6 +220,69 @@ class AtlasClassificationDef:
         )
 
 
+@dataclass
+class AtlasRelationshipAttributeDef(AtlasAttributeDef):
+    """Representation of a relationship attribute of an Apache Atlas entity typedef."""
+
+    relationship_type_name: Union[str, None, NULLABLE] = NULLABLE
+    is_legacy_attribute: Union[bool, None, NULLABLE] = NULLABLE
+
+
+@dataclass
+class AtlasEntityDef:
+    """Representation of an Apache Atlas entity typedef."""
+
+    name: str
+
+    description: Union[str, None, NULLABLE] = NULLABLE
+    type_version: Union[str, None, NULLABLE] = NULLABLE
+    service_type: Union[str, None, NULLABLE] = NULLABLE
+    options: Union[Dict[str, Any], None, NULLABLE] = NULLABLE
+    attribute_defs: Union[List[AtlasAttributeDef], None, NULLABLE] = NULLABLE
+    super_types: Union[List[str], None, NULLABLE] = NULLABLE
+
+    # Read-only (set by Atlas)
+    sub_types: Union[List[str], None, NULLABLE] = NULLABLE
+    relationship_attribute_defs: Union[
+        List[AtlasRelationshipAttributeDef],
+        None,
+        NULLABLE,
+    ] = NULLABLE
+    business_attribute_defs: Union[Dict[str, Any], None, NULLABLE] = NULLABLE
+    category: Union[str, None, NULLABLE] = NULLABLE
+    guid: Union[str, None, NULLABLE] = NULLABLE
+    version: Union[int, None, NULLABLE] = NULLABLE
+    create_time: Union[int, None, NULLABLE] = NULLABLE
+    update_time: Union[int, None, NULLABLE] = NULLABLE
+    created_by: Union[str, None, NULLABLE] = NULLABLE
+    updated_by: Union[str, None, NULLABLE] = NULLABLE
+
+    @classmethod
+    def argument_spec(cls) -> Dict[str, Any]:
+        """Return the Ansible argument spec for the mutable AtlasEntityDef parameters."""
+        return dict(
+            name=dict(type="str", required=False),
+            description=dict(type="str", required=False),
+            type_version=dict(type="str", required=False),
+            service_type=dict(type="str", required=False),
+            options=dict(type="dict", required=False),
+            attribute_defs=dict(
+                type="list",
+                elements="dict",
+                required=False,
+                options=AtlasAttributeDef.argument_spec(),
+            ),
+            super_types=dict(type="list", elements="str", required=False),
+        )
+
+
+def _convert_map_values(value: Any, convert: Any) -> Any:
+    """Apply `convert` to the values of a map, leaving its keys untouched."""
+    if isinstance(value, dict):
+        return {key: convert(val) for key, val in value.items()}
+    return convert(value)
+
+
 def _snake_preserving_options(value: Any) -> Any:
     """Convert camelCase keys to snake_case at any depth, leaving free-form maps verbatim."""
     if isinstance(value, list):
@@ -226,7 +293,15 @@ def _snake_preserving_options(value: Any) -> Any:
                 key
                 if key in VERBATIM_KEYS
                 else next(iter(camel_dict_to_snake_dict({key: None}, reversible=True)))
-            ): (val if key in VERBATIM_KEYS else _snake_preserving_options(val))
+            ): (
+                val
+                if key in VERBATIM_KEYS
+                else (
+                    _convert_map_values(val, _snake_preserving_options)
+                    if key in VERBATIM_MAP_KEYS
+                    else _snake_preserving_options(val)
+                )
+            )
             for key, val in value.items()
         }
     return value
@@ -273,7 +348,15 @@ def _camel_preserving_options(value: Any) -> Any:
                 key
                 if key in VERBATIM_KEYS
                 else next(iter(snake_dict_to_camel_dict({key: None})))
-            ): (val if key in VERBATIM_KEYS else _camel_preserving_options(val))
+            ): (
+                val
+                if key in VERBATIM_KEYS
+                else (
+                    _convert_map_values(val, _camel_preserving_options)
+                    if key in VERBATIM_MAP_KEYS
+                    else _camel_preserving_options(val)
+                )
+            )
             for key, val in value.items()
         }
     return value
@@ -289,6 +372,25 @@ def _classification_def_to_payload(
 def _classification_def_from_response(raw: Dict[str, Any]) -> AtlasClassificationDef:
     """Deserialise an Atlas classification typedef response."""
     return from_dict(AtlasClassificationDef, _snake_preserving_options(raw))
+
+
+def _entity_def_to_payload(entity_def: AtlasEntityDef) -> Dict[str, Any]:
+    """Serialise an AtlasEntityDef into a camelCase Atlas request payload."""
+    return _camel_preserving_options(to_dict(entity_def))
+
+
+def _written_def(result: Any, key: str, name: str) -> Dict[str, Any]:
+    """Pick the def Atlas returned for a written typedef, or raise if the bundle lacks it."""
+    defs = result.get(key) if isinstance(result, dict) else None
+    for candidate in defs or []:
+        if candidate.get("name") == name:
+            return candidate
+    raise ServicesError(f"Atlas did not return '{name}' in '{key}' after the write")
+
+
+def _entity_def_from_response(raw: Dict[str, Any]) -> AtlasEntityDef:
+    """Deserialise an Atlas entity typedef response."""
+    return from_dict(AtlasEntityDef, _snake_preserving_options(raw))
 
 
 class AtlasTypeDefClient:
@@ -323,6 +425,18 @@ class AtlasTypeDefClient:
             return None
 
         return _classification_def_from_response(result)
+
+    def get_entity_def_by_name(self, name: str) -> Optional[AtlasEntityDef]:
+        """Retrieve a single entity typedef by name, or None if not found."""
+        result = self.api_client.get(
+            f"{TYPES_API}/entitydef/name/{name}",
+            squelch={404: None},
+        )
+
+        if result is None:
+            return None
+
+        return _entity_def_from_response(result)
 
     def list_typedef_headers(self) -> List[Dict[str, Any]]:
         """List the headers (guid, name, category, service type) of all typedefs."""
@@ -386,6 +500,26 @@ class AtlasTypeDefClient:
             },
         )
         return _classification_def_from_response(result["classificationDefs"][0])
+
+    def create_entity_def(self, entity_def: AtlasEntityDef) -> AtlasEntityDef:
+        """Create a new entity typedef."""
+        result = self.api_client.post(
+            f"{TYPES_API}/typedefs",
+            data={"entityDefs": [_entity_def_to_payload(entity_def)]},
+        )
+        return _entity_def_from_response(
+            _written_def(result, "entityDefs", entity_def.name),
+        )
+
+    def update_entity_def(self, entity_def: AtlasEntityDef) -> AtlasEntityDef:
+        """Update an existing entity typedef."""
+        result = self.api_client.put(
+            f"{TYPES_API}/typedefs",
+            data={"entityDefs": [_entity_def_to_payload(entity_def)]},
+        )
+        return _entity_def_from_response(
+            _written_def(result, "entityDefs", entity_def.name),
+        )
 
     def delete_typedef_by_name(self, name: str) -> None:
         """Delete a typedef by name (idempotent)."""
@@ -476,12 +610,9 @@ def extract_enum_def_params(module_instance) -> Dict[str, Any]:
     return params
 
 
-def extract_classification_def_params(module_instance) -> Dict[str, Any]:
-    """Extract the mutable classification typedef parameters from a module instance into a dict."""
-    params: Dict[str, Any] = {
-        key: getattr(module_instance, key, None)
-        for key in AtlasClassificationDef.argument_spec()
-    }
+def _extract_params(module_instance, spec: Dict[str, Any]) -> Dict[str, Any]:
+    """Read the spec'd parameters off a module instance, dropping unset attribute suboptions."""
+    params: Dict[str, Any] = {key: getattr(module_instance, key, None) for key in spec}
 
     # Ansible fills unset suboptions with None; drop them so they stay unset
     # (NULLABLE) rather than serialising as explicit nulls.
@@ -499,3 +630,13 @@ def extract_classification_def_params(module_instance) -> Dict[str, Any]:
         params["attribute_defs"] = cleaned
 
     return params
+
+
+def extract_classification_def_params(module_instance) -> Dict[str, Any]:
+    """Extract the mutable classification typedef parameters from a module instance into a dict."""
+    return _extract_params(module_instance, AtlasClassificationDef.argument_spec())
+
+
+def extract_entity_def_params(module_instance) -> Dict[str, Any]:
+    """Extract the mutable entity typedef parameters from a module instance into a dict."""
+    return _extract_params(module_instance, AtlasEntityDef.argument_spec())

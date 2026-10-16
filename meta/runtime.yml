@@ -46,5 +46,6 @@ action_groups:
     - ranger_service_info
   atlas:
     - atlas_classification_def
+    - atlas_entity_def
     - atlas_enum_def
     - atlas_typedef_info
