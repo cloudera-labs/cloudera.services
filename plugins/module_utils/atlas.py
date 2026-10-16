@@ -221,6 +221,45 @@ class AtlasClassificationDef:
 
 
 @dataclass
+class AtlasStructDef:
+    """Representation of an Apache Atlas struct typedef."""
+
+    name: str
+
+    description: Union[str, None, NULLABLE] = NULLABLE
+    type_version: Union[str, None, NULLABLE] = NULLABLE
+    service_type: Union[str, None, NULLABLE] = NULLABLE
+    options: Union[Dict[str, Any], None, NULLABLE] = NULLABLE
+    attribute_defs: Union[List[AtlasAttributeDef], None, NULLABLE] = NULLABLE
+
+    # Read-only (set by Atlas)
+    category: Union[str, None, NULLABLE] = NULLABLE
+    guid: Union[str, None, NULLABLE] = NULLABLE
+    version: Union[int, None, NULLABLE] = NULLABLE
+    create_time: Union[int, None, NULLABLE] = NULLABLE
+    update_time: Union[int, None, NULLABLE] = NULLABLE
+    created_by: Union[str, None, NULLABLE] = NULLABLE
+    updated_by: Union[str, None, NULLABLE] = NULLABLE
+
+    @classmethod
+    def argument_spec(cls) -> Dict[str, Any]:
+        """Return the Ansible argument spec for the mutable AtlasStructDef parameters."""
+        return dict(
+            name=dict(type="str", required=False),
+            description=dict(type="str", required=False),
+            type_version=dict(type="str", required=False),
+            service_type=dict(type="str", required=False),
+            options=dict(type="dict", required=False),
+            attribute_defs=dict(
+                type="list",
+                elements="dict",
+                required=False,
+                options=AtlasAttributeDef.argument_spec(),
+            ),
+        )
+
+
+@dataclass
 class AtlasRelationshipAttributeDef(AtlasAttributeDef):
     """Representation of a relationship attribute of an Apache Atlas entity typedef."""
 
@@ -393,6 +432,16 @@ def _entity_def_from_response(raw: Dict[str, Any]) -> AtlasEntityDef:
     return from_dict(AtlasEntityDef, _snake_preserving_options(raw))
 
 
+def _struct_def_to_payload(struct_def: AtlasStructDef) -> Dict[str, Any]:
+    """Serialise an AtlasStructDef into a camelCase Atlas request payload."""
+    return _camel_preserving_options(to_dict(struct_def))
+
+
+def _struct_def_from_response(raw: Dict[str, Any]) -> AtlasStructDef:
+    """Deserialise an Atlas struct typedef response."""
+    return from_dict(AtlasStructDef, _snake_preserving_options(raw))
+
+
 class AtlasTypeDefClient:
     """Apache Atlas typedef API client."""
 
@@ -437,6 +486,18 @@ class AtlasTypeDefClient:
             return None
 
         return _entity_def_from_response(result)
+
+    def get_struct_def_by_name(self, name: str) -> Optional[AtlasStructDef]:
+        """Retrieve a single struct typedef by name, or None if not found."""
+        result = self.api_client.get(
+            f"{TYPES_API}/structdef/name/{name}",
+            squelch={404: None},
+        )
+
+        if result is None:
+            return None
+
+        return _struct_def_from_response(result)
 
     def list_typedef_headers(self) -> List[Dict[str, Any]]:
         """List the headers (guid, name, category, service type) of all typedefs."""
@@ -519,6 +580,26 @@ class AtlasTypeDefClient:
         )
         return _entity_def_from_response(
             _written_def(result, "entityDefs", entity_def.name),
+        )
+
+    def create_struct_def(self, struct_def: AtlasStructDef) -> AtlasStructDef:
+        """Create a new struct typedef."""
+        result = self.api_client.post(
+            f"{TYPES_API}/typedefs",
+            data={"structDefs": [_struct_def_to_payload(struct_def)]},
+        )
+        return _struct_def_from_response(
+            _written_def(result, "structDefs", struct_def.name),
+        )
+
+    def update_struct_def(self, struct_def: AtlasStructDef) -> AtlasStructDef:
+        """Update an existing struct typedef."""
+        result = self.api_client.put(
+            f"{TYPES_API}/typedefs",
+            data={"structDefs": [_struct_def_to_payload(struct_def)]},
+        )
+        return _struct_def_from_response(
+            _written_def(result, "structDefs", struct_def.name),
         )
 
     def delete_typedef_by_name(self, name: str) -> None:
@@ -640,3 +721,8 @@ def extract_classification_def_params(module_instance) -> Dict[str, Any]:
 def extract_entity_def_params(module_instance) -> Dict[str, Any]:
     """Extract the mutable entity typedef parameters from a module instance into a dict."""
     return _extract_params(module_instance, AtlasEntityDef.argument_spec())
+
+
+def extract_struct_def_params(module_instance) -> Dict[str, Any]:
+    """Extract the mutable struct typedef parameters from a module instance into a dict."""
+    return _extract_params(module_instance, AtlasStructDef.argument_spec())
