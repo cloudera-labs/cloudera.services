@@ -66,6 +66,7 @@ from ansible_collections.cloudera.services.plugins.module_utils.atlas import (
     AtlasEntityDef,
     AtlasEnumDef,
     AtlasEnumElementDef,
+    AtlasStructDef,
     AtlasTypeDefClient,
 )
 from ansible_collections.cloudera.services.plugins.module_utils.ranger import (
@@ -2357,3 +2358,27 @@ def atlas_deletable_entity_def(
     atlas_purge_typedef(name)
 
     yield entity_def
+
+
+@pytest.fixture
+def atlas_deletable_struct_def(
+    request,
+    atlas_typedef_client,
+    atlas_purge_typedef,
+) -> Generator[AtlasStructDef, None, None]:
+    """Fixture to create a function-scoped test struct typedef that can be modified or deleted."""
+    name = _atlas_type_name("deletable", request.node.name)
+
+    atlas_typedef_client.delete_typedef_by_name(name)
+
+    struct_def = atlas_typedef_client.create_struct_def(
+        AtlasStructDef(
+            name=name,
+            description="Deletable struct created by pytest - safe to delete",
+            attribute_defs=[AtlasAttributeDef(name="street", type_name="string")],
+        ),
+    )
+
+    atlas_purge_typedef(name)
+
+    yield struct_def
