@@ -42,6 +42,10 @@ action_groups:
     - ssb_udf
     - ssb_user_keytab
   ranger:
+    - ranger_policy
+    - ranger_policy_info
+    - ranger_role
+    - ranger_role_info
     - ranger_service
     - ranger_service_info
   atlas:
