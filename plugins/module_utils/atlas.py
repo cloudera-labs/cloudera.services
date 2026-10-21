@@ -260,6 +260,45 @@ class AtlasStructDef:
 
 
 @dataclass
+class AtlasBusinessMetadataDef:
+    """Representation of an Apache Atlas business metadata typedef."""
+
+    name: str
+
+    description: Union[str, None, NULLABLE] = NULLABLE
+    type_version: Union[str, None, NULLABLE] = NULLABLE
+    service_type: Union[str, None, NULLABLE] = NULLABLE
+    options: Union[Dict[str, Any], None, NULLABLE] = NULLABLE
+    attribute_defs: Union[List[AtlasAttributeDef], None, NULLABLE] = NULLABLE
+
+    # Read-only (set by Atlas)
+    category: Union[str, None, NULLABLE] = NULLABLE
+    guid: Union[str, None, NULLABLE] = NULLABLE
+    version: Union[int, None, NULLABLE] = NULLABLE
+    create_time: Union[int, None, NULLABLE] = NULLABLE
+    update_time: Union[int, None, NULLABLE] = NULLABLE
+    created_by: Union[str, None, NULLABLE] = NULLABLE
+    updated_by: Union[str, None, NULLABLE] = NULLABLE
+
+    @classmethod
+    def argument_spec(cls) -> Dict[str, Any]:
+        """Return the Ansible argument spec for the mutable AtlasBusinessMetadataDef parameters."""
+        return dict(
+            name=dict(type="str", required=False),
+            description=dict(type="str", required=False),
+            type_version=dict(type="str", required=False),
+            service_type=dict(type="str", required=False),
+            options=dict(type="dict", required=False),
+            attribute_defs=dict(
+                type="list",
+                elements="dict",
+                required=False,
+                options=AtlasAttributeDef.argument_spec(),
+            ),
+        )
+
+
+@dataclass
 class AtlasRelationshipEndDef:
     """Representation of one end of an Apache Atlas relationship typedef."""
 
@@ -548,6 +587,20 @@ def _relationship_def_from_response(raw: Dict[str, Any]) -> AtlasRelationshipDef
     return from_dict(AtlasRelationshipDef, _snake_preserving_options(raw))
 
 
+def _business_metadata_def_to_payload(
+    business_metadata_def: AtlasBusinessMetadataDef,
+) -> Dict[str, Any]:
+    """Serialise an AtlasBusinessMetadataDef into a camelCase Atlas request payload."""
+    return _camel_preserving_options(to_dict(business_metadata_def))
+
+
+def _business_metadata_def_from_response(
+    raw: Dict[str, Any],
+) -> AtlasBusinessMetadataDef:
+    """Deserialise an Atlas business metadata typedef response."""
+    return from_dict(AtlasBusinessMetadataDef, _snake_preserving_options(raw))
+
+
 class AtlasTypeDefClient:
     """Apache Atlas typedef API client."""
 
@@ -619,6 +672,21 @@ class AtlasTypeDefClient:
             return None
 
         return _relationship_def_from_response(result)
+
+    def get_business_metadata_def_by_name(
+        self,
+        name: str,
+    ) -> Optional[AtlasBusinessMetadataDef]:
+        """Retrieve a single business metadata typedef by name, or None if not found."""
+        result = self.api_client.get(
+            f"{TYPES_API}/businessmetadatadef/name/{name}",
+            squelch={404: None},
+        )
+
+        if result is None:
+            return None
+
+        return _business_metadata_def_from_response(result)
 
     def list_typedef_headers(self) -> List[Dict[str, Any]]:
         """List the headers (guid, name, category, service type) of all typedefs."""
@@ -753,11 +821,60 @@ class AtlasTypeDefClient:
             _written_def(result, "relationshipDefs", relationship_def.name),
         )
 
-    def delete_typedef_by_name(self, name: str) -> None:
-        """Delete a typedef by name (idempotent)."""
+    def create_business_metadata_def(
+        self,
+        business_metadata_def: AtlasBusinessMetadataDef,
+    ) -> AtlasBusinessMetadataDef:
+        """Create a new business metadata typedef."""
+        result = self.api_client.post(
+            f"{TYPES_API}/typedefs",
+            data={
+                "businessMetadataDefs": [
+                    _business_metadata_def_to_payload(business_metadata_def),
+                ],
+            },
+        )
+        return _business_metadata_def_from_response(
+            _written_def(
+                result,
+                "businessMetadataDefs",
+                business_metadata_def.name,
+            ),
+        )
+
+    def update_business_metadata_def(
+        self,
+        business_metadata_def: AtlasBusinessMetadataDef,
+    ) -> AtlasBusinessMetadataDef:
+        """Update an existing business metadata typedef."""
+        result = self.api_client.put(
+            f"{TYPES_API}/typedefs",
+            data={
+                "businessMetadataDefs": [
+                    _business_metadata_def_to_payload(business_metadata_def),
+                ],
+            },
+        )
+        return _business_metadata_def_from_response(
+            _written_def(
+                result,
+                "businessMetadataDefs",
+                business_metadata_def.name,
+            ),
+        )
+
+    def delete_typedef_by_name(self, name: str, force: bool = False) -> None:
+        """
+        Delete a typedef by name (idempotent).
+
+        With `force`, Atlas skips reference validation, which it otherwise
+        requires for types such as business metadata with non-indexable attributes.
+        """
+        extra: Dict[str, Any] = {"params": {"force": "true"}} if force else {}
         self.api_client.delete(
             f"{TYPES_API}/typedef/name/{name}",
             squelch={404: None},
+            **extra,
         )
 
 
@@ -910,3 +1027,8 @@ def extract_relationship_def_params(module_instance) -> Dict[str, Any]:
             params[key] = {k: v for k, v in end.items() if v is not None}
 
     return params
+
+
+def extract_business_metadata_def_params(module_instance) -> Dict[str, Any]:
+    """Extract the mutable business metadata typedef parameters from a module instance into a dict."""
+    return _extract_params(module_instance, AtlasBusinessMetadataDef.argument_spec())
