@@ -260,6 +260,100 @@ class AtlasStructDef:
 
 
 @dataclass
+class AtlasRelationshipEndDef:
+    """Representation of one end of an Apache Atlas relationship typedef."""
+
+    type: str
+    name: str
+
+    cardinality: Union[str, None, NULLABLE] = NULLABLE
+    is_container: Union[bool, None, NULLABLE] = NULLABLE
+    is_legacy_attribute: Union[bool, None, NULLABLE] = NULLABLE
+    description: Union[str, None, NULLABLE] = NULLABLE
+
+    @classmethod
+    def argument_spec(cls) -> Dict[str, Any]:
+        """Return the Ansible argument spec for the mutable end parameters."""
+        return dict(
+            type=dict(type="str", required=True),
+            name=dict(type="str", required=True),
+            cardinality=dict(
+                type="str",
+                required=False,
+                choices=["SINGLE", "LIST", "SET"],
+            ),
+            is_container=dict(type="bool", required=False),
+            is_legacy_attribute=dict(type="bool", required=False),
+            description=dict(type="str", required=False),
+        )
+
+
+@dataclass
+class AtlasRelationshipDef:
+    """Representation of an Apache Atlas relationship typedef."""
+
+    name: str
+
+    description: Union[str, None, NULLABLE] = NULLABLE
+    type_version: Union[str, None, NULLABLE] = NULLABLE
+    service_type: Union[str, None, NULLABLE] = NULLABLE
+    options: Union[Dict[str, Any], None, NULLABLE] = NULLABLE
+    attribute_defs: Union[List[AtlasAttributeDef], None, NULLABLE] = NULLABLE
+    end_def1: Union[AtlasRelationshipEndDef, None, NULLABLE] = NULLABLE
+    end_def2: Union[AtlasRelationshipEndDef, None, NULLABLE] = NULLABLE
+    relationship_category: Union[str, None, NULLABLE] = NULLABLE
+    relationship_label: Union[str, None, NULLABLE] = NULLABLE
+    propagate_tags: Union[str, None, NULLABLE] = NULLABLE
+
+    # Read-only (set by Atlas)
+    category: Union[str, None, NULLABLE] = NULLABLE
+    guid: Union[str, None, NULLABLE] = NULLABLE
+    version: Union[int, None, NULLABLE] = NULLABLE
+    create_time: Union[int, None, NULLABLE] = NULLABLE
+    update_time: Union[int, None, NULLABLE] = NULLABLE
+    created_by: Union[str, None, NULLABLE] = NULLABLE
+    updated_by: Union[str, None, NULLABLE] = NULLABLE
+
+    @classmethod
+    def argument_spec(cls) -> Dict[str, Any]:
+        """Return the Ansible argument spec for the mutable AtlasRelationshipDef parameters."""
+        return dict(
+            name=dict(type="str", required=False),
+            description=dict(type="str", required=False),
+            type_version=dict(type="str", required=False),
+            service_type=dict(type="str", required=False),
+            options=dict(type="dict", required=False),
+            attribute_defs=dict(
+                type="list",
+                elements="dict",
+                required=False,
+                options=AtlasAttributeDef.argument_spec(),
+            ),
+            end_def1=dict(
+                type="dict",
+                required=False,
+                options=AtlasRelationshipEndDef.argument_spec(),
+            ),
+            end_def2=dict(
+                type="dict",
+                required=False,
+                options=AtlasRelationshipEndDef.argument_spec(),
+            ),
+            relationship_category=dict(
+                type="str",
+                required=False,
+                choices=["ASSOCIATION", "AGGREGATION", "COMPOSITION"],
+            ),
+            relationship_label=dict(type="str", required=False),
+            propagate_tags=dict(
+                type="str",
+                required=False,
+                choices=["NONE", "ONE_TO_TWO", "TWO_TO_ONE", "BOTH"],
+            ),
+        )
+
+
+@dataclass
 class AtlasRelationshipAttributeDef(AtlasAttributeDef):
     """Representation of a relationship attribute of an Apache Atlas entity typedef."""
 
@@ -442,6 +536,18 @@ def _struct_def_from_response(raw: Dict[str, Any]) -> AtlasStructDef:
     return from_dict(AtlasStructDef, _snake_preserving_options(raw))
 
 
+def _relationship_def_to_payload(
+    relationship_def: AtlasRelationshipDef,
+) -> Dict[str, Any]:
+    """Serialise an AtlasRelationshipDef into a camelCase Atlas request payload."""
+    return _camel_preserving_options(to_dict(relationship_def))
+
+
+def _relationship_def_from_response(raw: Dict[str, Any]) -> AtlasRelationshipDef:
+    """Deserialise an Atlas relationship typedef response."""
+    return from_dict(AtlasRelationshipDef, _snake_preserving_options(raw))
+
+
 class AtlasTypeDefClient:
     """Apache Atlas typedef API client."""
 
@@ -498,6 +604,21 @@ class AtlasTypeDefClient:
             return None
 
         return _struct_def_from_response(result)
+
+    def get_relationship_def_by_name(
+        self,
+        name: str,
+    ) -> Optional[AtlasRelationshipDef]:
+        """Retrieve a single relationship typedef by name, or None if not found."""
+        result = self.api_client.get(
+            f"{TYPES_API}/relationshipdef/name/{name}",
+            squelch={404: None},
+        )
+
+        if result is None:
+            return None
+
+        return _relationship_def_from_response(result)
 
     def list_typedef_headers(self) -> List[Dict[str, Any]]:
         """List the headers (guid, name, category, service type) of all typedefs."""
@@ -602,6 +723,36 @@ class AtlasTypeDefClient:
             _written_def(result, "structDefs", struct_def.name),
         )
 
+    def create_relationship_def(
+        self,
+        relationship_def: AtlasRelationshipDef,
+    ) -> AtlasRelationshipDef:
+        """Create a new relationship typedef."""
+        result = self.api_client.post(
+            f"{TYPES_API}/typedefs",
+            data={
+                "relationshipDefs": [_relationship_def_to_payload(relationship_def)],
+            },
+        )
+        return _relationship_def_from_response(
+            _written_def(result, "relationshipDefs", relationship_def.name),
+        )
+
+    def update_relationship_def(
+        self,
+        relationship_def: AtlasRelationshipDef,
+    ) -> AtlasRelationshipDef:
+        """Update an existing relationship typedef."""
+        result = self.api_client.put(
+            f"{TYPES_API}/typedefs",
+            data={
+                "relationshipDefs": [_relationship_def_to_payload(relationship_def)],
+            },
+        )
+        return _relationship_def_from_response(
+            _written_def(result, "relationshipDefs", relationship_def.name),
+        )
+
     def delete_typedef_by_name(self, name: str) -> None:
         """Delete a typedef by name (idempotent)."""
         self.api_client.delete(
@@ -673,6 +824,26 @@ def align_attribute_defs(
     return aligned
 
 
+def align_relationship_end_def(
+    incoming: AtlasRelationshipEndDef,
+    existing: AtlasRelationshipEndDef,
+) -> AtlasRelationshipEndDef:
+    """
+    Fill unset fields of an incoming relationship end from the existing end, so
+    Atlas-assigned defaults do not register as a change.
+    """
+    return AtlasRelationshipEndDef(
+        **{
+            field.name: (
+                getattr(existing, field.name)
+                if getattr(incoming, field.name) is NULLABLE
+                else getattr(incoming, field.name)
+            )
+            for field in fields(AtlasRelationshipEndDef)
+        },
+    )
+
+
 def extract_enum_def_params(module_instance) -> Dict[str, Any]:
     """Extract the mutable enum typedef parameters from a module instance into a dict."""
     params: Dict[str, Any] = {
@@ -726,3 +897,16 @@ def extract_entity_def_params(module_instance) -> Dict[str, Any]:
 def extract_struct_def_params(module_instance) -> Dict[str, Any]:
     """Extract the mutable struct typedef parameters from a module instance into a dict."""
     return _extract_params(module_instance, AtlasStructDef.argument_spec())
+
+
+def extract_relationship_def_params(module_instance) -> Dict[str, Any]:
+    """Extract the mutable relationship typedef parameters from a module instance into a dict."""
+    params = _extract_params(module_instance, AtlasRelationshipDef.argument_spec())
+
+    # Ansible fills unset suboptions with None; drop them so they stay unset.
+    for key in ("end_def1", "end_def2"):
+        end = params.get(key)
+        if end is not None:
+            params[key] = {k: v for k, v in end.items() if v is not None}
+
+    return params
