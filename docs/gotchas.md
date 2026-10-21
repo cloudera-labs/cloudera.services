@@ -13,3 +13,7 @@
 9. **Pagination termination**: a continuation token that is *present but empty/`None`* must terminate the loop — test both "token present" **and** "has a value", or `@paginated` spins forever
 10. **Test basename collisions**: unique basenames required (prepend import mode, no `__init__.py`)
 11. **Check-mode return values vary by module**: SSB modules return `{}` in check-mode; `ml_project` returns the *intended* resource dict. Assert `changed` + verify persistence via the client, rather than assuming an empty return
+12. **Atlas free-form maps are verbatim**: `options` and `params` keys (and the keys of `business_attribute_defs`) are user data — never case-convert them. Register new free-form maps in `VERBATIM_KEYS`/`VERBATIM_MAP_KEYS` in `module_utils/atlas.py`
+13. **Atlas fills defaults server-side**: attribute flags, cardinality and enum ordinals come back populated even when unset in the request. Align incoming against existing (`align_attribute_defs()`, `align_enum_elements()`) before `diff_dict()`, or a re-run reports `changed`
+14. **Atlas constrains attribute changes**: adding an attribute to an existing classification is rejected unless it is `is_optional`, and removing attributes or enum elements in use may be rejected. Let the `ServicesError` carry Atlas's message instead of pre-validating
+15. **Atlas type names in tests**: build them with `_atlas_type_name()` (`ansible_test_<prefix>_<test name>`, letters, digits and underscores only) rather than hyphenated names, to stay within Atlas's type-name rules
