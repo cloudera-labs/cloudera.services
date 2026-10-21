@@ -27,7 +27,7 @@ COLLECTION_ROOT = Path(__file__).resolve().parents[3]
 
 # Action groups named after the module prefix, so every `<prefix>_*` module
 # must be listed in the `<prefix>` group of meta/runtime.yml.
-CHECKED_GROUPS = ["ranger", "atlas"]
+CHECKED_GROUPS = ["ranger", "atlas", "ssb"]
 
 
 @pytest.fixture(scope="module")

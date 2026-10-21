@@ -36,10 +36,20 @@ action_groups:
     - ml_runtimes_info
     - ml_runtime_addons_info
   ssb:
-    - ssb_catalog
     - ssb_data_source
+    - ssb_data_source_info
+    - ssb_environment
+    - ssb_environment_info
     - ssb_job
+    - ssb_job_info
+    - ssb_project
+    - ssb_project_info
+    - ssb_table
+    - ssb_table_info
     - ssb_udf
+    - ssb_udf_info
+    - ssb_user
+    - ssb_user_info
     - ssb_user_keytab
   ranger:
     - ranger_policy
