@@ -64,6 +64,7 @@ action_groups:
     - ranger_service
     - ranger_service_info
   atlas:
+    - atlas_business_metadata_def
     - atlas_classification_def
     - atlas_entity_def
     - atlas_enum_def
