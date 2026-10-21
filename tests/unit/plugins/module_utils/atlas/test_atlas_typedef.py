@@ -191,6 +191,22 @@ def test_delete_typedef_by_name(mocker):
     )
 
 
+def test_delete_typedef_by_name_force(mocker):
+    """Test force is sent to Atlas as a query parameter."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.delete.return_value = None
+
+    client = AtlasTypeDefClient(api_client=api_client)
+
+    assert client.delete_typedef_by_name("test_bm", force=True) is None
+
+    api_client.delete.assert_called_once_with(
+        "/api/atlas/v2/types/typedef/name/test_bm",
+        params={"force": "true"},
+        squelch={404: None},
+    )
+
+
 def test_list_typedef_headers(mocker):
     """Test listing typedef headers returns snake_case dicts."""
     api_client = mocker.create_autospec(ServicesClient, instance=True)
