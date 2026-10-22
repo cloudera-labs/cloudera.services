@@ -711,7 +711,9 @@ class AtlasTypeDefClient:
             f"{TYPES_API}/typedefs",
             data={"enumDefs": [_enum_def_to_payload(enum_def)]},
         )
-        return _enum_def_from_response(result["enumDefs"][0])
+        return _enum_def_from_response(
+            _written_def(result, "enumDefs", enum_def.name),
+        )
 
     def update_enum_def(self, enum_def: AtlasEnumDef) -> AtlasEnumDef:
         """Update an existing enum typedef."""
@@ -719,7 +721,9 @@ class AtlasTypeDefClient:
             f"{TYPES_API}/typedefs",
             data={"enumDefs": [_enum_def_to_payload(enum_def)]},
         )
-        return _enum_def_from_response(result["enumDefs"][0])
+        return _enum_def_from_response(
+            _written_def(result, "enumDefs", enum_def.name),
+        )
 
     def create_classification_def(
         self,
@@ -734,7 +738,9 @@ class AtlasTypeDefClient:
                 ],
             },
         )
-        return _classification_def_from_response(result["classificationDefs"][0])
+        return _classification_def_from_response(
+            _written_def(result, "classificationDefs", classification_def.name),
+        )
 
     def update_classification_def(
         self,
@@ -749,7 +755,9 @@ class AtlasTypeDefClient:
                 ],
             },
         )
-        return _classification_def_from_response(result["classificationDefs"][0])
+        return _classification_def_from_response(
+            _written_def(result, "classificationDefs", classification_def.name),
+        )
 
     def create_entity_def(self, entity_def: AtlasEntityDef) -> AtlasEntityDef:
         """Create a new entity typedef."""
