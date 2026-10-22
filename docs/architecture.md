@@ -54,6 +54,18 @@ class SsbProjectClient:
         # API calls here
 ```
 
+## Apache Atlas Typedefs
+
+All Atlas type definitions share one client, `AtlasTypeDefClient` in `plugins/module_utils/atlas.py`, with one module per category (`atlas_enum_def`, `atlas_classification_def`, `atlas_entity_def`, `atlas_struct_def`) and a read-only `atlas_typedef_info`. To add a category:
+- A dataclass with an `argument_spec()` classmethod (optional fields `Union[T, None, NULLABLE]`), the `get_<category>_def_by_name`, `create_<category>_def` and `update_<category>_def` client methods, and an `extract_<category>_def_params()` helper
+- Reuse `delete_typedef_by_name()`; deleting a missing typedef is a no-op
+
+Conventions:
+- **Bundles:** Atlas writes go to `/api/atlas/v2/types/typedefs` as a bundle, `{"<category>Defs": [def]}`. The client sends one def and keeps the module single-resource. Pick the written def out of the response by name with `_written_def()` (entity and struct use it), which raises `ServicesError` when the bundle lacks it
+- **Not found:** a 404 on read is squelched to `None`
+- **Verbatim maps:** free-form maps (`options`, `params`) and maps keyed by user-chosen names (`business_attribute_defs`) must not be camelCased or snake_cased. Add new ones to `VERBATIM_KEYS` or `VERBATIM_MAP_KEYS`
+- **Idempotence:** Atlas fills in defaults on the server (attribute flags, enum ordinals). `build_from_params(..., existing=existing)` replaces nested lists wholesale, so call `align_attribute_defs()` or `align_enum_elements()` before `diff_dict()`. Otherwise unset fields register as a change on every run
+
 ## State Management
 
 - Standard states: `present`, `absent`

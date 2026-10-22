@@ -13,6 +13,10 @@
 * Manage and control [Cloudera Stream Processing (CSP)](https://www.cloudera.com/products/stream-processing.html) assets, including
   * Configure SQL Stream Builder (SSB) catalogs and data sources and run jobs
   * Create and manage Streams Messaging Manager (SSM) Kafka topics
+* Manage [Apache Ranger](https://ranger.apache.org/) authorization assets, including
+  * Services, policies, and roles
+* Manage [Apache Atlas](https://atlas.apache.org/) metadata on CDP Private Cloud Base, including
+  * Type definitions (enums, structs, classifications, and entities) and queries for existing type definitions
 
 and more!
 
