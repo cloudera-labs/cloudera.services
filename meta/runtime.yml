@@ -16,10 +16,11 @@
 
 requires_ansible: ">=2.15"
 action_groups:
-  # TODO Convert to use 'extend_group'
   ml_project:
     - ml_project_application_info
     - ml_project_application
+    - ml_project_file_info
+    - ml_project_file
     - ml_project_info
     - ml_project_job_info
     - ml_project_job_run_info
@@ -33,8 +34,12 @@ action_groups:
     - ml_project_model
     - ml_project
   ml:
-    - ml_runtimes_info
-    - ml_runtime_addons_info
+    - ml_runtime_addon_info
+    - ml_runtime_addon
+    - ml_runtime_info
+    - ml_runtime_repo_info
+    - ml_runtime_repo
+    - ml_runtime
   ssb:
     - ssb_data_source
     - ssb_data_source_info

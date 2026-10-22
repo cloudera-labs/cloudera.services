@@ -36,23 +36,33 @@ def action_groups():
     return runtime["action_groups"]
 
 
-@pytest.mark.parametrize("prefix", CHECKED_GROUPS)
-def test_action_group_lists_every_module(action_groups, prefix):
-    """Test each module with the group's prefix is in its action group."""
+# Every checked group maps to the glob of the modules it must list. The ML
+# groups split by area instead of sharing one prefix.
+GROUP_PATTERNS = {
+    **{prefix: f"{prefix}_*" for prefix in CHECKED_GROUPS},
+    "ml": "ml_runtime*",
+    "ml_project": "ml_project*",
+}
+
+
+@pytest.mark.parametrize("group", sorted(GROUP_PATTERNS))
+def test_action_group_lists_every_module(action_groups, group):
+    """Test each module matching the group's pattern is in its action group."""
+    pattern = GROUP_PATTERNS[group]
     modules = {
         path.stem
-        for path in (COLLECTION_ROOT / "plugins" / "modules").glob(f"{prefix}_*.py")
+        for path in (COLLECTION_ROOT / "plugins" / "modules").glob(f"{pattern}.py")
     }
 
-    assert modules, f"no modules found for prefix '{prefix}'"
-    assert sorted(modules - set(action_groups[prefix])) == []
+    assert modules, f"no modules found for pattern '{pattern}'"
+    assert sorted(modules - set(action_groups[group])) == []
 
 
-@pytest.mark.parametrize("prefix", CHECKED_GROUPS)
-def test_action_group_lists_only_existing_modules(action_groups, prefix):
+@pytest.mark.parametrize("group", sorted(GROUP_PATTERNS))
+def test_action_group_lists_only_existing_modules(action_groups, group):
     """Test each action group entry has a module behind it."""
     modules = {
         path.stem for path in (COLLECTION_ROOT / "plugins" / "modules").glob("*.py")
     }
 
-    assert sorted(set(action_groups[prefix]) - modules) == []
+    assert sorted(set(action_groups[group]) - modules) == []
