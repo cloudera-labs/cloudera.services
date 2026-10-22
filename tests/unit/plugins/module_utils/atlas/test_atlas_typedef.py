@@ -18,8 +18,11 @@ from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
 
+import pytest
+
 from ansible_collections.cloudera.services.plugins.module_utils.common import (
     ServicesClient,
+    ServicesError,
 )
 from ansible_collections.cloudera.services.plugins.module_utils.atlas import (
     AtlasEnumDef,
@@ -264,3 +267,56 @@ def test_get_typedef_by_name_not_found(mocker):
     client = AtlasTypeDefClient(api_client=api_client)
 
     assert client.get_typedef_by_name("missing") is None
+
+
+def test_create_enum_def_picks_written_def_from_bundle(mocker):
+    """Test the created enum is matched by name, not taken from position."""
+    other = dict(ENUM_RESPONSE, name="other_enum", guid="other-guid")
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.post.return_value = {"enumDefs": [other, ENUM_RESPONSE]}
+
+    client = AtlasTypeDefClient(api_client=api_client)
+
+    result = client.create_enum_def(AtlasEnumDef(name="test_enum"))
+
+    assert result.guid == "enum-guid-1"
+
+
+@pytest.mark.parametrize(
+    "response",
+    [{}, {"enumDefs": []}, {"enumDefs": [dict(ENUM_RESPONSE, name="other_enum")]}],
+    ids=["empty-bundle", "no-enum-defs", "other-enum-only"],
+)
+def test_create_enum_def_missing_from_bundle(mocker, response):
+    """Test a bundle without the written enum raises a ServicesError."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.post.return_value = response
+
+    client = AtlasTypeDefClient(api_client=api_client)
+
+    with pytest.raises(ServicesError, match="test_enum"):
+        client.create_enum_def(AtlasEnumDef(name="test_enum"))
+
+
+def test_update_enum_def_picks_written_def_from_bundle(mocker):
+    """Test the updated enum is matched by name, not taken from position."""
+    other = dict(ENUM_RESPONSE, name="other_enum", guid="other-guid")
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.put.return_value = {"enumDefs": [other, ENUM_RESPONSE]}
+
+    client = AtlasTypeDefClient(api_client=api_client)
+
+    result = client.update_enum_def(AtlasEnumDef(name="test_enum"))
+
+    assert result.guid == "enum-guid-1"
+
+
+def test_update_enum_def_missing_from_bundle(mocker):
+    """Test an update response without the enum raises a ServicesError."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.put.return_value = {"enumDefs": []}
+
+    client = AtlasTypeDefClient(api_client=api_client)
+
+    with pytest.raises(ServicesError, match="test_enum"):
+        client.update_enum_def(AtlasEnumDef(name="test_enum"))

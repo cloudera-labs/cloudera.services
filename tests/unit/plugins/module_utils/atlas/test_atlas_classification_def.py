@@ -18,8 +18,11 @@ from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
 
+import pytest
+
 from ansible_collections.cloudera.services.plugins.module_utils.common import (
     ServicesClient,
+    ServicesError,
 )
 from ansible_collections.cloudera.services.plugins.module_utils.atlas import (
     AtlasAttributeDef,
@@ -231,3 +234,84 @@ def test_update_classification_def(mocker):
             ],
         },
     )
+
+
+def test_create_classification_def_picks_written_def_from_bundle(mocker):
+    """Test the created classification is matched by name, not taken from position."""
+    other = dict(
+        CLASSIFICATION_RESPONSE,
+        name="other_classification",
+        guid="other-guid",
+    )
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.post.return_value = {
+        "classificationDefs": [other, CLASSIFICATION_RESPONSE],
+    }
+
+    client = AtlasTypeDefClient(api_client=api_client)
+
+    result = client.create_classification_def(
+        AtlasClassificationDef(name="test_classification"),
+    )
+
+    assert result.guid == "cls-guid-1"
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {},
+        {"classificationDefs": []},
+        {
+            "classificationDefs": [
+                dict(CLASSIFICATION_RESPONSE, name="other_classification"),
+            ],
+        },
+    ],
+    ids=["empty-bundle", "no-classification-defs", "other-classification-only"],
+)
+def test_create_classification_def_missing_from_bundle(mocker, response):
+    """Test a bundle without the written classification raises a ServicesError."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.post.return_value = response
+
+    client = AtlasTypeDefClient(api_client=api_client)
+
+    with pytest.raises(ServicesError, match="test_classification"):
+        client.create_classification_def(
+            AtlasClassificationDef(name="test_classification"),
+        )
+
+
+def test_update_classification_def_picks_written_def_from_bundle(mocker):
+    """Test the updated classification is matched by name, not taken from position."""
+    other = dict(
+        CLASSIFICATION_RESPONSE,
+        name="other_classification",
+        guid="other-guid",
+    )
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.put.return_value = {
+        "classificationDefs": [other, CLASSIFICATION_RESPONSE],
+    }
+
+    client = AtlasTypeDefClient(api_client=api_client)
+
+    result = client.update_classification_def(
+        AtlasClassificationDef(name="test_classification"),
+    )
+
+    assert result.guid == "cls-guid-1"
+
+
+def test_update_classification_def_missing_from_bundle(mocker):
+    """Test an update response without the classification raises a ServicesError."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.put.return_value = {"classificationDefs": []}
+
+    client = AtlasTypeDefClient(api_client=api_client)
+
+    with pytest.raises(ServicesError, match="test_classification"):
+        client.update_classification_def(
+            AtlasClassificationDef(name="test_classification"),
+        )
