@@ -16,7 +16,7 @@
 * Manage [Apache Ranger](https://ranger.apache.org/) authorization assets, including
   * Services, policies, and roles
 * Manage [Apache Atlas](https://atlas.apache.org/) metadata on CDP Private Cloud Base, including
-  * Type definitions (enums, structs, classifications, and entities) and queries for existing type definitions
+  * Type definitions (enums, structs, classifications, entities, relationships, and business metadata) and queries for existing type definitions
 
 and more!
 
