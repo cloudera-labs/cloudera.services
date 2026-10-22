@@ -32,7 +32,7 @@ from kafka import KafkaAdminClient, KafkaProducer
 from kafka.admin import NewTopic
 from kafka.errors import TopicAlreadyExistsError, UnknownTopicOrPartitionError
 from pytest_mock import MockerFixture
-from typing import Any, Callable, Dict, Generator, List, Optional
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 from unittest.mock import Mock
 
 from ansible.module_utils import basic
@@ -66,6 +66,8 @@ from ansible_collections.cloudera.services.plugins.module_utils.atlas import (
     AtlasEntityDef,
     AtlasEnumDef,
     AtlasEnumElementDef,
+    AtlasRelationshipDef,
+    AtlasRelationshipEndDef,
     AtlasStructDef,
     AtlasTypeDefClient,
 )
@@ -2382,3 +2384,70 @@ def atlas_deletable_struct_def(
     atlas_purge_typedef(name)
 
     yield struct_def
+
+
+@pytest.fixture
+def atlas_relationship_end_types(
+    request,
+    atlas_typedef_client,
+) -> Generator[Tuple[str, str], None, None]:
+    """
+    Fixture to create the two function-scoped entity typedefs a relationship connects.
+
+    List this fixture before `atlas_purge_typedef` in a test so a relationship
+    registered for purge is deleted before the types it references.
+    """
+    parent = _atlas_type_name("parent", request.node.name)
+    child = _atlas_type_name("child", request.node.name)
+
+    for name in (parent, child):
+        atlas_typedef_client.delete_typedef_by_name(name)
+        atlas_typedef_client.create_entity_def(AtlasEntityDef(name=name))
+
+    yield parent, child
+
+    for name in (parent, child):
+        try:
+            atlas_typedef_client.delete_typedef_by_name(name)
+        except Exception as e:
+            warnings.warn(
+                f"Failed to delete typedef {name} during cleanup: {str(e)}",
+                RuntimeWarning,
+            )
+
+
+@pytest.fixture
+def atlas_deletable_relationship_def(
+    request,
+    atlas_typedef_client,
+    atlas_relationship_end_types,
+    atlas_purge_typedef,
+) -> Generator[AtlasRelationshipDef, None, None]:
+    """Fixture to create a function-scoped test relationship typedef that can be modified or deleted."""
+    parent, child = atlas_relationship_end_types
+    name = _atlas_type_name("deletable", request.node.name)
+
+    atlas_typedef_client.delete_typedef_by_name(name)
+
+    relationship_def = atlas_typedef_client.create_relationship_def(
+        AtlasRelationshipDef(
+            name=name,
+            description="Deletable relationship created by pytest - safe to delete",
+            relationship_category="ASSOCIATION",
+            propagate_tags="NONE",
+            end_def1=AtlasRelationshipEndDef(
+                type=parent,
+                name="ansible_test_children",
+                cardinality="SET",
+            ),
+            end_def2=AtlasRelationshipEndDef(
+                type=child,
+                name="ansible_test_parent",
+                cardinality="SINGLE",
+            ),
+        ),
+    )
+
+    atlas_purge_typedef(name)
+
+    yield relationship_def
