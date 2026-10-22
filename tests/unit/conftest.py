@@ -62,6 +62,7 @@ from ansible_collections.cloudera.services.plugins.module_utils.ssb import (
 )
 from ansible_collections.cloudera.services.plugins.module_utils.atlas import (
     AtlasAttributeDef,
+    AtlasBusinessMetadataDef,
     AtlasClassificationDef,
     AtlasEntityDef,
     AtlasEnumDef,
@@ -2239,18 +2240,23 @@ def atlas_typedef_client(atlas_rest_client) -> AtlasTypeDefClient:
 def atlas_purge_typedef(
     atlas_typedef_client,
 ) -> Generator[Callable[[str], str], None, None]:
-    """Factory fixture to register typedef names for cleanup after the test."""
-    names: List[str] = []
+    """
+    Factory fixture to register typedef names for cleanup after the test.
 
-    def _register(name: str) -> str:
-        names.append(name)
+    Pass `force=True` for types Atlas will not delete otherwise, such as business
+    metadata with non-indexable attributes.
+    """
+    names: List[Tuple[str, bool]] = []
+
+    def _register(name: str, force: bool = False) -> str:
+        names.append((name, force))
         return name
 
     yield _register
 
-    for name in names:
+    for name, force in names:
         try:
-            atlas_typedef_client.delete_typedef_by_name(name)
+            atlas_typedef_client.delete_typedef_by_name(name, force=force)
         except Exception as e:
             warnings.warn(
                 f"Failed to delete typedef {name} during cleanup: {str(e)}",
@@ -2448,6 +2454,40 @@ def atlas_deletable_relationship_def(
         ),
     )
 
-    atlas_purge_typedef(name)
+    atlas_purge_typedef(name, force=True)
 
     yield relationship_def
+
+
+@pytest.fixture
+def atlas_deletable_business_metadata_def(
+    request,
+    atlas_typedef_client,
+    atlas_purge_typedef,
+) -> Generator[AtlasBusinessMetadataDef, None, None]:
+    """Fixture to create a function-scoped test business metadata typedef that can be modified or deleted."""
+    name = _atlas_type_name("deletable", request.node.name)
+
+    atlas_typedef_client.delete_typedef_by_name(name, force=True)
+
+    business_metadata_def = atlas_typedef_client.create_business_metadata_def(
+        AtlasBusinessMetadataDef(
+            name=name,
+            description="Deletable business metadata created by pytest - safe to delete",
+            attribute_defs=[
+                AtlasAttributeDef(
+                    name="owner",
+                    type_name="string",
+                    is_optional=True,
+                    options={
+                        "applicableEntityTypes": '["hive_table"]',
+                        "maxStrLength": "50",
+                    },
+                ),
+            ],
+        ),
+    )
+
+    atlas_purge_typedef(name, force=True)
+
+    yield business_metadata_def
