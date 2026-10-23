@@ -18,8 +18,8 @@
 REST clients for the Apache Atlas API.
 """
 
-from dataclasses import dataclass, fields
-from typing import Any, Dict, List, Optional, Union, cast
+from dataclasses import dataclass, fields, replace
+from typing import Any, Callable, Dict, List, Optional, Union, cast
 
 from ansible.module_utils.common.dict_transformations import (
     camel_dict_to_snake_dict,
@@ -510,17 +510,18 @@ def _enum_def_from_response(raw: Dict[str, Any]) -> AtlasEnumDef:
     return enum_def
 
 
+def _camel_key(key: str) -> str:
+    """Convert one snake_case key to camelCase."""
+    return next(iter(cast(Dict[str, Any], snake_dict_to_camel_dict({key: None}))))
+
+
 def _camel_preserving_options(value: Any) -> Any:
     """Convert snake_case keys to camelCase at any depth, leaving free-form maps verbatim."""
     if isinstance(value, list):
         return [_camel_preserving_options(item) for item in value]
     if isinstance(value, dict):
         return {
-            (
-                key
-                if key in VERBATIM_KEYS
-                else next(iter(snake_dict_to_camel_dict({key: None})))
-            ): (
+            (key if key in VERBATIM_KEYS else _camel_key(key)): (
                 val
                 if key in VERBATIM_KEYS
                 else (
@@ -534,23 +535,6 @@ def _camel_preserving_options(value: Any) -> Any:
     return value
 
 
-def _classification_def_to_payload(
-    classification_def: AtlasClassificationDef,
-) -> Dict[str, Any]:
-    """Serialise an AtlasClassificationDef into a camelCase Atlas request payload."""
-    return _camel_preserving_options(to_dict(classification_def))
-
-
-def _classification_def_from_response(raw: Dict[str, Any]) -> AtlasClassificationDef:
-    """Deserialise an Atlas classification typedef response."""
-    return from_dict(AtlasClassificationDef, _snake_preserving_options(raw))
-
-
-def _entity_def_to_payload(entity_def: AtlasEntityDef) -> Dict[str, Any]:
-    """Serialise an AtlasEntityDef into a camelCase Atlas request payload."""
-    return _camel_preserving_options(to_dict(entity_def))
-
-
 def _written_def(result: Any, key: str, name: str) -> Dict[str, Any]:
     """Pick the def Atlas returned for a written typedef, or raise if the bundle lacks it."""
     defs = result.get(key) if isinstance(result, dict) else None
@@ -560,45 +544,54 @@ def _written_def(result: Any, key: str, name: str) -> Dict[str, Any]:
     raise ServicesError(f"Atlas did not return '{name}' in '{key}' after the write")
 
 
-def _entity_def_from_response(raw: Dict[str, Any]) -> AtlasEntityDef:
-    """Deserialise an Atlas entity typedef response."""
-    return from_dict(AtlasEntityDef, _snake_preserving_options(raw))
+@dataclass(frozen=True)
+class _TypeDefKind:
+    """How the client marshals and converts one Atlas typedef category."""
+
+    cls: type
+    segment: str
+    bundle_key: str
+    # Set only where a category needs more than the generic conversion.
+    to_payload: Optional[Callable[[Any], Dict[str, Any]]] = None
+    from_response: Optional[Callable[[Dict[str, Any]], Any]] = None
+
+    def build_payload(self, typedef: Any) -> Dict[str, Any]:
+        """Serialise a typedef into a camelCase Atlas request payload."""
+        if self.to_payload is not None:
+            return self.to_payload(typedef)
+        return _camel_preserving_options(to_dict(typedef))
+
+    def parse_response(self, raw: Dict[str, Any]) -> Any:
+        """Deserialise an Atlas typedef response into this category's dataclass."""
+        if self.from_response is not None:
+            return self.from_response(raw)
+        return from_dict(self.cls, _snake_preserving_options(raw))
 
 
-def _struct_def_to_payload(struct_def: AtlasStructDef) -> Dict[str, Any]:
-    """Serialise an AtlasStructDef into a camelCase Atlas request payload."""
-    return _camel_preserving_options(to_dict(struct_def))
-
-
-def _struct_def_from_response(raw: Dict[str, Any]) -> AtlasStructDef:
-    """Deserialise an Atlas struct typedef response."""
-    return from_dict(AtlasStructDef, _snake_preserving_options(raw))
-
-
-def _relationship_def_to_payload(
-    relationship_def: AtlasRelationshipDef,
-) -> Dict[str, Any]:
-    """Serialise an AtlasRelationshipDef into a camelCase Atlas request payload."""
-    return _camel_preserving_options(to_dict(relationship_def))
-
-
-def _relationship_def_from_response(raw: Dict[str, Any]) -> AtlasRelationshipDef:
-    """Deserialise an Atlas relationship typedef response."""
-    return from_dict(AtlasRelationshipDef, _snake_preserving_options(raw))
-
-
-def _business_metadata_def_to_payload(
-    business_metadata_def: AtlasBusinessMetadataDef,
-) -> Dict[str, Any]:
-    """Serialise an AtlasBusinessMetadataDef into a camelCase Atlas request payload."""
-    return _camel_preserving_options(to_dict(business_metadata_def))
-
-
-def _business_metadata_def_from_response(
-    raw: Dict[str, Any],
-) -> AtlasBusinessMetadataDef:
-    """Deserialise an Atlas business metadata typedef response."""
-    return from_dict(AtlasBusinessMetadataDef, _snake_preserving_options(raw))
+_ENUM = _TypeDefKind(
+    AtlasEnumDef,
+    "enumdef",
+    "enumDefs",
+    _enum_def_to_payload,
+    _enum_def_from_response,
+)
+_CLASSIFICATION = _TypeDefKind(
+    AtlasClassificationDef,
+    "classificationdef",
+    "classificationDefs",
+)
+_ENTITY = _TypeDefKind(AtlasEntityDef, "entitydef", "entityDefs")
+_STRUCT = _TypeDefKind(AtlasStructDef, "structdef", "structDefs")
+_RELATIONSHIP = _TypeDefKind(
+    AtlasRelationshipDef,
+    "relationshipdef",
+    "relationshipDefs",
+)
+_BUSINESS_METADATA = _TypeDefKind(
+    AtlasBusinessMetadataDef,
+    "businessmetadatadef",
+    "businessMetadataDefs",
+)
 
 
 class AtlasTypeDefClient:
@@ -607,86 +600,65 @@ class AtlasTypeDefClient:
     def __init__(self, api_client: ServicesClient) -> None:
         self.api_client: ServicesClient = api_client
 
-    def get_enum_def_by_name(self, name: str) -> Optional[AtlasEnumDef]:
-        """Retrieve a single enum typedef by name, or None if not found."""
+    def _get_def(self, kind: _TypeDefKind, name: str) -> Optional[Any]:
+        """Retrieve a typedef of the given category by name, or None if not found."""
         result = self.api_client.get(
-            f"{TYPES_API}/enumdef/name/{name}",
+            f"{TYPES_API}/{kind.segment}/name/{name}",
             squelch={404: None},
         )
 
         if result is None:
             return None
 
-        return _enum_def_from_response(result)
+        return kind.parse_response(result)
+
+    def _write_def(
+        self,
+        write: Callable[..., Any],
+        kind: _TypeDefKind,
+        typedef: Any,
+    ) -> Any:
+        """Create (POST) or update (PUT) a typedef and return the def Atlas wrote."""
+        result = write(
+            f"{TYPES_API}/typedefs",
+            data={kind.bundle_key: [kind.build_payload(typedef)]},
+        )
+        return kind.parse_response(
+            _written_def(result, kind.bundle_key, typedef.name),
+        )
+
+    def get_enum_def_by_name(self, name: str) -> Optional[AtlasEnumDef]:
+        """Retrieve a single enum typedef by name, or None if not found."""
+        return self._get_def(_ENUM, name)
 
     def get_classification_def_by_name(
         self,
         name: str,
     ) -> Optional[AtlasClassificationDef]:
         """Retrieve a single classification typedef by name, or None if not found."""
-        result = self.api_client.get(
-            f"{TYPES_API}/classificationdef/name/{name}",
-            squelch={404: None},
-        )
-
-        if result is None:
-            return None
-
-        return _classification_def_from_response(result)
+        return self._get_def(_CLASSIFICATION, name)
 
     def get_entity_def_by_name(self, name: str) -> Optional[AtlasEntityDef]:
         """Retrieve a single entity typedef by name, or None if not found."""
-        result = self.api_client.get(
-            f"{TYPES_API}/entitydef/name/{name}",
-            squelch={404: None},
-        )
-
-        if result is None:
-            return None
-
-        return _entity_def_from_response(result)
+        return self._get_def(_ENTITY, name)
 
     def get_struct_def_by_name(self, name: str) -> Optional[AtlasStructDef]:
         """Retrieve a single struct typedef by name, or None if not found."""
-        result = self.api_client.get(
-            f"{TYPES_API}/structdef/name/{name}",
-            squelch={404: None},
-        )
-
-        if result is None:
-            return None
-
-        return _struct_def_from_response(result)
+        return self._get_def(_STRUCT, name)
 
     def get_relationship_def_by_name(
         self,
         name: str,
     ) -> Optional[AtlasRelationshipDef]:
         """Retrieve a single relationship typedef by name, or None if not found."""
-        result = self.api_client.get(
-            f"{TYPES_API}/relationshipdef/name/{name}",
-            squelch={404: None},
-        )
-
-        if result is None:
-            return None
-
-        return _relationship_def_from_response(result)
+        return self._get_def(_RELATIONSHIP, name)
 
     def get_business_metadata_def_by_name(
         self,
         name: str,
     ) -> Optional[AtlasBusinessMetadataDef]:
         """Retrieve a single business metadata typedef by name, or None if not found."""
-        result = self.api_client.get(
-            f"{TYPES_API}/businessmetadatadef/name/{name}",
-            squelch={404: None},
-        )
-
-        if result is None:
-            return None
-
-        return _business_metadata_def_from_response(result)
+        return self._get_def(_BUSINESS_METADATA, name)
 
     def list_typedef_headers(self) -> List[Dict[str, Any]]:
         """List the headers (guid, name, category, service type) of all typedefs."""
@@ -707,39 +679,21 @@ class AtlasTypeDefClient:
 
     def create_enum_def(self, enum_def: AtlasEnumDef) -> AtlasEnumDef:
         """Create a new enum typedef."""
-        result = self.api_client.post(
-            f"{TYPES_API}/typedefs",
-            data={"enumDefs": [_enum_def_to_payload(enum_def)]},
-        )
-        return _enum_def_from_response(
-            _written_def(result, "enumDefs", enum_def.name),
-        )
+        return self._write_def(self.api_client.post, _ENUM, enum_def)
 
     def update_enum_def(self, enum_def: AtlasEnumDef) -> AtlasEnumDef:
         """Update an existing enum typedef."""
-        result = self.api_client.put(
-            f"{TYPES_API}/typedefs",
-            data={"enumDefs": [_enum_def_to_payload(enum_def)]},
-        )
-        return _enum_def_from_response(
-            _written_def(result, "enumDefs", enum_def.name),
-        )
+        return self._write_def(self.api_client.put, _ENUM, enum_def)
 
     def create_classification_def(
         self,
         classification_def: AtlasClassificationDef,
     ) -> AtlasClassificationDef:
         """Create a new classification typedef."""
-        result = self.api_client.post(
-            f"{TYPES_API}/typedefs",
-            data={
-                "classificationDefs": [
-                    _classification_def_to_payload(classification_def),
-                ],
-            },
-        )
-        return _classification_def_from_response(
-            _written_def(result, "classificationDefs", classification_def.name),
+        return self._write_def(
+            self.api_client.post,
+            _CLASSIFICATION,
+            classification_def,
         )
 
     def update_classification_def(
@@ -747,107 +701,47 @@ class AtlasTypeDefClient:
         classification_def: AtlasClassificationDef,
     ) -> AtlasClassificationDef:
         """Update an existing classification typedef."""
-        result = self.api_client.put(
-            f"{TYPES_API}/typedefs",
-            data={
-                "classificationDefs": [
-                    _classification_def_to_payload(classification_def),
-                ],
-            },
-        )
-        return _classification_def_from_response(
-            _written_def(result, "classificationDefs", classification_def.name),
-        )
+        return self._write_def(self.api_client.put, _CLASSIFICATION, classification_def)
 
     def create_entity_def(self, entity_def: AtlasEntityDef) -> AtlasEntityDef:
         """Create a new entity typedef."""
-        result = self.api_client.post(
-            f"{TYPES_API}/typedefs",
-            data={"entityDefs": [_entity_def_to_payload(entity_def)]},
-        )
-        return _entity_def_from_response(
-            _written_def(result, "entityDefs", entity_def.name),
-        )
+        return self._write_def(self.api_client.post, _ENTITY, entity_def)
 
     def update_entity_def(self, entity_def: AtlasEntityDef) -> AtlasEntityDef:
         """Update an existing entity typedef."""
-        result = self.api_client.put(
-            f"{TYPES_API}/typedefs",
-            data={"entityDefs": [_entity_def_to_payload(entity_def)]},
-        )
-        return _entity_def_from_response(
-            _written_def(result, "entityDefs", entity_def.name),
-        )
+        return self._write_def(self.api_client.put, _ENTITY, entity_def)
 
     def create_struct_def(self, struct_def: AtlasStructDef) -> AtlasStructDef:
         """Create a new struct typedef."""
-        result = self.api_client.post(
-            f"{TYPES_API}/typedefs",
-            data={"structDefs": [_struct_def_to_payload(struct_def)]},
-        )
-        return _struct_def_from_response(
-            _written_def(result, "structDefs", struct_def.name),
-        )
+        return self._write_def(self.api_client.post, _STRUCT, struct_def)
 
     def update_struct_def(self, struct_def: AtlasStructDef) -> AtlasStructDef:
         """Update an existing struct typedef."""
-        result = self.api_client.put(
-            f"{TYPES_API}/typedefs",
-            data={"structDefs": [_struct_def_to_payload(struct_def)]},
-        )
-        return _struct_def_from_response(
-            _written_def(result, "structDefs", struct_def.name),
-        )
+        return self._write_def(self.api_client.put, _STRUCT, struct_def)
 
     def create_relationship_def(
         self,
         relationship_def: AtlasRelationshipDef,
     ) -> AtlasRelationshipDef:
         """Create a new relationship typedef."""
-        result = self.api_client.post(
-            f"{TYPES_API}/typedefs",
-            data={
-                "relationshipDefs": [_relationship_def_to_payload(relationship_def)],
-            },
-        )
-        return _relationship_def_from_response(
-            _written_def(result, "relationshipDefs", relationship_def.name),
-        )
+        return self._write_def(self.api_client.post, _RELATIONSHIP, relationship_def)
 
     def update_relationship_def(
         self,
         relationship_def: AtlasRelationshipDef,
     ) -> AtlasRelationshipDef:
         """Update an existing relationship typedef."""
-        result = self.api_client.put(
-            f"{TYPES_API}/typedefs",
-            data={
-                "relationshipDefs": [_relationship_def_to_payload(relationship_def)],
-            },
-        )
-        return _relationship_def_from_response(
-            _written_def(result, "relationshipDefs", relationship_def.name),
-        )
+        return self._write_def(self.api_client.put, _RELATIONSHIP, relationship_def)
 
     def create_business_metadata_def(
         self,
         business_metadata_def: AtlasBusinessMetadataDef,
     ) -> AtlasBusinessMetadataDef:
         """Create a new business metadata typedef."""
-        result = self.api_client.post(
-            f"{TYPES_API}/typedefs",
-            data={
-                "businessMetadataDefs": [
-                    _business_metadata_def_to_payload(business_metadata_def),
-                ],
-            },
-        )
-        return _business_metadata_def_from_response(
-            _written_def(
-                result,
-                "businessMetadataDefs",
-                business_metadata_def.name,
-            ),
+        return self._write_def(
+            self.api_client.post,
+            _BUSINESS_METADATA,
+            business_metadata_def,
         )
 
     def update_business_metadata_def(
@@ -855,20 +749,10 @@ class AtlasTypeDefClient:
         business_metadata_def: AtlasBusinessMetadataDef,
     ) -> AtlasBusinessMetadataDef:
         """Update an existing business metadata typedef."""
-        result = self.api_client.put(
-            f"{TYPES_API}/typedefs",
-            data={
-                "businessMetadataDefs": [
-                    _business_metadata_def_to_payload(business_metadata_def),
-                ],
-            },
-        )
-        return _business_metadata_def_from_response(
-            _written_def(
-                result,
-                "businessMetadataDefs",
-                business_metadata_def.name,
-            ),
+        return self._write_def(
+            self.api_client.put,
+            _BUSINESS_METADATA,
+            business_metadata_def,
         )
 
     def delete_typedef_by_name(self, name: str, force: bool = False) -> None:
@@ -886,6 +770,32 @@ class AtlasTypeDefClient:
         )
 
 
+def _fill_unset(incoming: Any, existing: Any) -> Any:
+    """Return `incoming` with each unset (NULLABLE) field taken from `existing`."""
+    return replace(
+        incoming,
+        **{
+            field.name: getattr(existing, field.name)
+            for field in fields(incoming)
+            if getattr(incoming, field.name) is NULLABLE
+        },
+    )
+
+
+def _align_by_key(incoming: List[Any], existing: List[Any], key: str) -> List[Any]:
+    """Fill unset fields of each incoming item from the existing item with the same `key`."""
+    existing_by_key = {getattr(item, key): item for item in existing}
+
+    return [
+        (
+            _fill_unset(item, existing_by_key[getattr(item, key)])
+            if getattr(item, key) in existing_by_key
+            else item
+        )
+        for item in incoming
+    ]
+
+
 def align_enum_elements(
     incoming: List[AtlasEnumElementDef],
     existing: List[AtlasEnumElementDef],
@@ -894,28 +804,7 @@ def align_enum_elements(
     Fill unset ordinal/description of incoming elements from the existing element
     with the same value, so Atlas-assigned ordinals do not register as a change.
     """
-    existing_by_value = {element.value: element for element in existing}
-
-    aligned = []
-    for element in incoming:
-        match = existing_by_value.get(element.value)
-        if match is None:
-            aligned.append(element)
-            continue
-        aligned.append(
-            AtlasEnumElementDef(
-                value=element.value,
-                ordinal=(
-                    match.ordinal if element.ordinal is NULLABLE else element.ordinal
-                ),
-                description=(
-                    match.description
-                    if element.description is NULLABLE
-                    else element.description
-                ),
-            ),
-        )
-    return aligned
+    return _align_by_key(incoming, existing, "value")
 
 
 def align_attribute_defs(
@@ -926,27 +815,7 @@ def align_attribute_defs(
     Fill unset fields of incoming attributes from the existing attribute with the
     same name, so Atlas-assigned defaults do not register as a change.
     """
-    existing_by_name = {attribute.name: attribute for attribute in existing}
-
-    aligned = []
-    for attribute in incoming:
-        match = existing_by_name.get(attribute.name)
-        if match is None:
-            aligned.append(attribute)
-            continue
-        aligned.append(
-            AtlasAttributeDef(
-                **{
-                    field.name: (
-                        getattr(match, field.name)
-                        if getattr(attribute, field.name) is NULLABLE
-                        else getattr(attribute, field.name)
-                    )
-                    for field in fields(AtlasAttributeDef)
-                },
-            ),
-        )
-    return aligned
+    return _align_by_key(incoming, existing, "name")
 
 
 def align_relationship_end_def(
@@ -957,56 +826,49 @@ def align_relationship_end_def(
     Fill unset fields of an incoming relationship end from the existing end, so
     Atlas-assigned defaults do not register as a change.
     """
-    return AtlasRelationshipEndDef(
-        **{
-            field.name: (
-                getattr(existing, field.name)
-                if getattr(incoming, field.name) is NULLABLE
-                else getattr(incoming, field.name)
-            )
-            for field in fields(AtlasRelationshipEndDef)
-        },
-    )
+    return _fill_unset(incoming, existing)
+
+
+def _drop_none(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop the unset (None) top-level keys of a suboption dict."""
+    return {k: v for k, v in item.items() if v is not None}
+
+
+def _clean_attribute(attribute: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop unset keys from an attribute and from each of its constraints."""
+    attribute = _drop_none(attribute)
+    if "constraints" in attribute:
+        attribute["constraints"] = [
+            _drop_none(constraint) for constraint in attribute["constraints"]
+        ]
+    return attribute
+
+
+# Ansible fills unset suboptions with None; drop them so they stay unset
+# (NULLABLE) rather than serialising as explicit nulls. Cleaning stops at these
+# levels: `options` and constraint `params` are user data and are left untouched.
+_LIST_PARAM_CLEANERS = {"attribute_defs": _clean_attribute, "element_defs": _drop_none}
+_DICT_PARAM_CLEANERS = {"end_def1": _drop_none, "end_def2": _drop_none}
+
+
+def _extract_params(module_instance, spec: Dict[str, Any]) -> Dict[str, Any]:
+    """Read the spec'd parameters off a module instance, dropping unset suboptions."""
+    params: Dict[str, Any] = {key: getattr(module_instance, key, None) for key in spec}
+
+    for key, clean in _LIST_PARAM_CLEANERS.items():
+        if params.get(key) is not None:
+            params[key] = [clean(item) for item in params[key]]
+
+    for key, clean in _DICT_PARAM_CLEANERS.items():
+        if params.get(key) is not None:
+            params[key] = clean(params[key])
+
+    return params
 
 
 def extract_enum_def_params(module_instance) -> Dict[str, Any]:
     """Extract the mutable enum typedef parameters from a module instance into a dict."""
-    params: Dict[str, Any] = {
-        key: getattr(module_instance, key, None) for key in AtlasEnumDef.argument_spec()
-    }
-
-    # Ansible fills unset suboptions with None; drop them so they stay unset
-    # (NULLABLE) rather than serialising as explicit nulls.
-    element_defs: Optional[List[Dict[str, Any]]] = params.get("element_defs")
-    if element_defs is not None:
-        params["element_defs"] = [
-            {k: v for k, v in element.items() if v is not None}
-            for element in element_defs
-        ]
-
-    return params
-
-
-def _extract_params(module_instance, spec: Dict[str, Any]) -> Dict[str, Any]:
-    """Read the spec'd parameters off a module instance, dropping unset attribute suboptions."""
-    params: Dict[str, Any] = {key: getattr(module_instance, key, None) for key in spec}
-
-    # Ansible fills unset suboptions with None; drop them so they stay unset
-    # (NULLABLE) rather than serialising as explicit nulls.
-    attribute_defs: Optional[List[Dict[str, Any]]] = params.get("attribute_defs")
-    if attribute_defs is not None:
-        cleaned = []
-        for attribute in attribute_defs:
-            attribute = {k: v for k, v in attribute.items() if v is not None}
-            if "constraints" in attribute:
-                attribute["constraints"] = [
-                    {k: v for k, v in constraint.items() if v is not None}
-                    for constraint in attribute["constraints"]
-                ]
-            cleaned.append(attribute)
-        params["attribute_defs"] = cleaned
-
-    return params
+    return _extract_params(module_instance, AtlasEnumDef.argument_spec())
 
 
 def extract_classification_def_params(module_instance) -> Dict[str, Any]:
@@ -1026,15 +888,7 @@ def extract_struct_def_params(module_instance) -> Dict[str, Any]:
 
 def extract_relationship_def_params(module_instance) -> Dict[str, Any]:
     """Extract the mutable relationship typedef parameters from a module instance into a dict."""
-    params = _extract_params(module_instance, AtlasRelationshipDef.argument_spec())
-
-    # Ansible fills unset suboptions with None; drop them so they stay unset.
-    for key in ("end_def1", "end_def2"):
-        end = params.get(key)
-        if end is not None:
-            params[key] = {k: v for k, v in end.items() if v is not None}
-
-    return params
+    return _extract_params(module_instance, AtlasRelationshipDef.argument_spec())
 
 
 def extract_business_metadata_def_params(module_instance) -> Dict[str, Any]:
