@@ -18,13 +18,32 @@ from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
 
+from types import SimpleNamespace
+
+import pytest
+
 from ansible_collections.cloudera.services.plugins.module_utils.common import (
     ServicesClient,
+    ServicesError,
 )
 from ansible_collections.cloudera.services.plugins.module_utils.atlas import (
+    AtlasAttributeDef,
+    AtlasBusinessMetadataDef,
+    AtlasClassificationDef,
+    AtlasEntityDef,
     AtlasEnumDef,
     AtlasEnumElementDef,
+    AtlasRelationshipDef,
+    AtlasStructDef,
     AtlasTypeDefClient,
+    align_attribute_defs,
+    align_enum_elements,
+    extract_business_metadata_def_params,
+    extract_classification_def_params,
+    extract_entity_def_params,
+    extract_enum_def_params,
+    extract_relationship_def_params,
+    extract_struct_def_params,
 )
 
 # Atlas returns typedef objects with camelCase keys.
@@ -142,6 +161,7 @@ def test_enum_def_options_preserved_on_read(mocker):
 
     result = client.get_enum_def_by_name("test_enum")
 
+    assert isinstance(result, AtlasEnumDef)
     assert result.options == {"someCamelKey": "v", "other_key": "w"}
 
 
@@ -264,3 +284,240 @@ def test_get_typedef_by_name_not_found(mocker):
     client = AtlasTypeDefClient(api_client=api_client)
 
     assert client.get_typedef_by_name("missing") is None
+
+
+def test_create_enum_def_picks_written_def_from_bundle(mocker):
+    """Test the created enum is matched by name, not taken from position."""
+    other = dict(ENUM_RESPONSE, name="other_enum", guid="other-guid")
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.post.return_value = {"enumDefs": [other, ENUM_RESPONSE]}
+
+    client = AtlasTypeDefClient(api_client=api_client)
+
+    result = client.create_enum_def(AtlasEnumDef(name="test_enum"))
+
+    assert result.guid == "enum-guid-1"
+
+
+@pytest.mark.parametrize(
+    "response",
+    [{}, {"enumDefs": []}, {"enumDefs": [dict(ENUM_RESPONSE, name="other_enum")]}],
+    ids=["empty-bundle", "no-enum-defs", "other-enum-only"],
+)
+def test_create_enum_def_missing_from_bundle(mocker, response):
+    """Test a bundle without the written enum raises a ServicesError."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.post.return_value = response
+
+    client = AtlasTypeDefClient(api_client=api_client)
+
+    with pytest.raises(ServicesError, match="test_enum"):
+        client.create_enum_def(AtlasEnumDef(name="test_enum"))
+
+
+def test_update_enum_def_picks_written_def_from_bundle(mocker):
+    """Test the updated enum is matched by name, not taken from position."""
+    other = dict(ENUM_RESPONSE, name="other_enum", guid="other-guid")
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.put.return_value = {"enumDefs": [other, ENUM_RESPONSE]}
+
+    client = AtlasTypeDefClient(api_client=api_client)
+
+    result = client.update_enum_def(AtlasEnumDef(name="test_enum"))
+
+    assert result.guid == "enum-guid-1"
+
+
+def test_update_enum_def_missing_from_bundle(mocker):
+    """Test an update response without the enum raises a ServicesError."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.put.return_value = {"enumDefs": []}
+
+    client = AtlasTypeDefClient(api_client=api_client)
+
+    with pytest.raises(ServicesError, match="test_enum"):
+        client.update_enum_def(AtlasEnumDef(name="test_enum"))
+
+
+def test_extract_enum_def_params_drops_unset_element_fields():
+    """Test unset element fields are dropped so they stay unset, not explicit nulls."""
+    module = SimpleNamespace(
+        name="test_enum",
+        element_defs=[
+            {"value": "RED", "ordinal": None, "description": None},
+            {"value": "GREEN", "ordinal": 2, "description": "go"},
+        ],
+    )
+
+    params = extract_enum_def_params(module)
+
+    assert params["element_defs"] == [
+        {"value": "RED"},
+        {"value": "GREEN", "ordinal": 2, "description": "go"},
+    ]
+    assert params["name"] == "test_enum"
+    assert params["description"] is None
+    assert set(params) == set(AtlasEnumDef.argument_spec())
+
+
+ATTRIBUTE_EXTRACTORS = [
+    (extract_classification_def_params, AtlasClassificationDef),
+    (extract_entity_def_params, AtlasEntityDef),
+    (extract_struct_def_params, AtlasStructDef),
+    (extract_relationship_def_params, AtlasRelationshipDef),
+    (extract_business_metadata_def_params, AtlasBusinessMetadataDef),
+]
+ATTRIBUTE_EXTRACTOR_IDS = [
+    "classification",
+    "entity",
+    "struct",
+    "relationship",
+    "business-metadata",
+]
+
+
+@pytest.mark.parametrize(
+    "extract, cls",
+    ATTRIBUTE_EXTRACTORS,
+    ids=ATTRIBUTE_EXTRACTOR_IDS,
+)
+def test_extract_params_drops_unset_attribute_and_constraint_fields(extract, cls):
+    """Test None is stripped from attributes and constraints but kept inside options and params."""
+    module = SimpleNamespace(
+        name="test_def",
+        attribute_defs=[
+            {
+                "name": "a",
+                "type_name": "string",
+                "is_optional": None,
+                "cardinality": "SINGLE",
+                "options": {"keep_none": None},
+                "constraints": [
+                    {"type": "ownedRef", "params": {"keep_none": None}},
+                    {"type": "inverseRef", "params": None},
+                ],
+            },
+            {"name": "b", "type_name": "int", "constraints": None},
+        ],
+    )
+
+    params = extract(module)
+
+    assert params["attribute_defs"] == [
+        {
+            "name": "a",
+            "type_name": "string",
+            "cardinality": "SINGLE",
+            "options": {"keep_none": None},
+            "constraints": [
+                {"type": "ownedRef", "params": {"keep_none": None}},
+                {"type": "inverseRef"},
+            ],
+        },
+        {"name": "b", "type_name": "int"},
+    ]
+    assert params["name"] == "test_def"
+    assert set(params) == set(cls.argument_spec())
+
+
+@pytest.mark.parametrize(
+    "extract, cls",
+    ATTRIBUTE_EXTRACTORS,
+    ids=ATTRIBUTE_EXTRACTOR_IDS,
+)
+def test_extract_params_leaves_unset_attribute_defs_unset(extract, cls):
+    """Test a module without attribute_defs extracts them as None."""
+    params = extract(SimpleNamespace(name="test_def"))
+
+    assert params["attribute_defs"] is None
+    assert set(params) == set(cls.argument_spec())
+
+
+def test_extract_relationship_def_params_drops_unset_end_fields():
+    """Test unset end def fields are dropped, and an unset end stays None."""
+    module = SimpleNamespace(
+        name="test_relationship",
+        end_def1={
+            "type": "parent",
+            "name": "children",
+            "cardinality": None,
+            "is_container": True,
+        },
+        end_def2=None,
+    )
+
+    params = extract_relationship_def_params(module)
+
+    assert params["end_def1"] == {
+        "type": "parent",
+        "name": "children",
+        "is_container": True,
+    }
+    assert params["end_def2"] is None
+
+
+def test_align_attribute_defs_fills_unset_fields_from_matching_attribute():
+    """Test unset fields take Atlas's values, set fields win, and unmatched attributes pass through."""
+    existing = [
+        AtlasAttributeDef(
+            name="a",
+            type_name="string",
+            is_optional=True,
+            cardinality="SINGLE",
+            options={"o": "1"},
+        ),
+        AtlasAttributeDef(name="removed", type_name="int"),
+    ]
+    new = AtlasAttributeDef(name="new", type_name="int")
+    incoming = [
+        AtlasAttributeDef(name="a", type_name="string", cardinality="LIST"),
+        new,
+    ]
+
+    aligned = align_attribute_defs(incoming, existing)
+
+    assert aligned == [
+        AtlasAttributeDef(
+            name="a",
+            type_name="string",
+            is_optional=True,
+            cardinality="LIST",
+            options={"o": "1"},
+        ),
+        new,
+    ]
+    assert aligned[1] is new
+
+
+def test_align_attribute_defs_treats_explicit_none_as_set():
+    """Test an explicit None is a value to send, not an unset field to fill in."""
+    existing = [AtlasAttributeDef(name="a", type_name="string", is_optional=True)]
+    incoming = [AtlasAttributeDef(name="a", type_name="string", is_optional=None)]
+
+    aligned = align_attribute_defs(incoming, existing)
+
+    assert aligned[0].is_optional is None
+
+
+def test_align_enum_elements_fills_unset_ordinal_and_description():
+    """Test matching elements take Atlas's ordinal and description when unset."""
+    existing = [
+        AtlasEnumElementDef(value="RED", ordinal=1, description="r"),
+        AtlasEnumElementDef(value="GREEN", ordinal=2),
+        AtlasEnumElementDef(value="removed", ordinal=3),
+    ]
+    blue = AtlasEnumElementDef(value="BLUE")
+    incoming = [
+        AtlasEnumElementDef(value="GREEN", description="g"),
+        blue,
+        AtlasEnumElementDef(value="RED", ordinal=9),
+    ]
+
+    aligned = align_enum_elements(incoming, existing)
+
+    assert aligned == [
+        AtlasEnumElementDef(value="GREEN", ordinal=2, description="g"),
+        blue,
+        AtlasEnumElementDef(value="RED", ordinal=9, description="r"),
+    ]
+    assert aligned[1] is blue
