@@ -18,13 +18,15 @@ from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
 
-import json
-
 import pytest
 
 from ansible_collections.cloudera.services.tests.unit import (
+    ATLAS_ERROR_MESSAGE,
+    FETCH_URL,
     AnsibleExitJson,
     AnsibleFailJson,
+    atlas_error_result,
+    http_result,
 )
 
 from ansible_collections.cloudera.services.plugins.modules import (
@@ -396,35 +398,12 @@ def test_atlas_business_metadata_def_module_invalid_arguments_fail(
     mock_get.assert_not_called()
 
 
-FETCH_URL = (
-    "ansible_collections.cloudera.services.plugins.module_utils.common.fetch_url"
-)
-
 BUSINESS_METADATA_EXISTING_JSON = {
     "category": "BUSINESS_METADATA",
     "guid": "bm-guid-1",
     "name": "test_business_metadata",
     "attributeDefs": [],
 }
-
-
-def _http(mocker, status, body=None):
-    """Build a fetch_url (response, info) result for the given status and JSON body."""
-    payload = json.dumps(body if body is not None else {})
-    resp = mocker.Mock()
-    resp.read.return_value = payload.encode("utf-8")
-    return resp, {"status": status, "msg": f"HTTP {status}", "body": payload}
-
-
-ATLAS_ERROR_MESSAGE = "ATLAS-400-00-0AB: type is referenced by other types"
-
-
-def _atlas_error(mocker):
-    return _http(
-        mocker,
-        400,
-        {"errorCode": "ATLAS-400-00-0AB", "errorMessage": ATLAS_ERROR_MESSAGE},
-    )
 
 
 def test_atlas_business_metadata_def_module_create_atlas_error_fails(
@@ -435,9 +414,9 @@ def test_atlas_business_metadata_def_module_create_atlas_error_fails(
 
     def fake_fetch_url(module, url, method="GET", **kwargs):
         if method == "GET":
-            return _http(mocker, 404)
+            return http_result(mocker, 404)
         assert method == "POST"
-        return _atlas_error(mocker)
+        return atlas_error_result(mocker)
 
     mocker.patch(FETCH_URL, side_effect=fake_fetch_url)
 
@@ -457,9 +436,9 @@ def test_atlas_business_metadata_def_module_update_atlas_error_fails(
 
     def fake_fetch_url(module, url, method="GET", **kwargs):
         if method == "GET":
-            return _http(mocker, 200, BUSINESS_METADATA_EXISTING_JSON)
+            return http_result(mocker, 200, BUSINESS_METADATA_EXISTING_JSON)
         assert method == "PUT"
-        return _atlas_error(mocker)
+        return atlas_error_result(mocker)
 
     mocker.patch(FETCH_URL, side_effect=fake_fetch_url)
 
@@ -479,9 +458,9 @@ def test_atlas_business_metadata_def_module_delete_atlas_error_fails(
 
     def fake_fetch_url(module, url, method="GET", **kwargs):
         if method == "GET":
-            return _http(mocker, 200, BUSINESS_METADATA_EXISTING_JSON)
+            return http_result(mocker, 200, BUSINESS_METADATA_EXISTING_JSON)
         assert method == "DELETE"
-        return _atlas_error(mocker)
+        return atlas_error_result(mocker)
 
     mocker.patch(FETCH_URL, side_effect=fake_fetch_url)
 
@@ -501,8 +480,8 @@ def test_atlas_business_metadata_def_module_unexpected_response_fails(
 
     def fake_fetch_url(module, url, method="GET", **kwargs):
         if method == "GET":
-            return _http(mocker, 404)
-        return _http(mocker, 200, {"businessMetadataDefs": []})
+            return http_result(mocker, 404)
+        return http_result(mocker, 200, {"businessMetadataDefs": []})
 
     mocker.patch(FETCH_URL, side_effect=fake_fetch_url)
 
@@ -548,9 +527,9 @@ def test_atlas_business_metadata_def_module_absent_non_indexable_fails_without_f
     def fake_fetch_url(module, url, method="GET", **kwargs):
         requests.append((method, url))
         if method == "GET":
-            return _http(mocker, 200, BUSINESS_METADATA_EXISTING_JSON)
+            return http_result(mocker, 200, BUSINESS_METADATA_EXISTING_JSON)
         assert method == "DELETE"
-        return _http(
+        return http_result(
             mocker,
             400,
             {"errorCode": "ATLAS-400-00-114", "errorMessage": NON_INDEXABLE_MESSAGE},
@@ -578,9 +557,9 @@ def test_atlas_business_metadata_def_module_absent_force_sends_query_parameter(
     def fake_fetch_url(module, url, method="GET", **kwargs):
         requests.append((method, url))
         if method == "GET":
-            return _http(mocker, 200, BUSINESS_METADATA_EXISTING_JSON)
+            return http_result(mocker, 200, BUSINESS_METADATA_EXISTING_JSON)
         assert method == "DELETE"
-        return _http(mocker, 204)
+        return http_result(mocker, 204)
 
     mocker.patch(FETCH_URL, side_effect=fake_fetch_url)
 

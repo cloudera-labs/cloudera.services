@@ -2187,6 +2187,32 @@ def _atlas_type_name(prefix: str, raw: str) -> str:
     return f"ansible_test_{prefix}_{re.sub(r'[^a-z0-9]+', '_', raw.lower()).strip('_')}"
 
 
+def _safe_delete(client: AtlasTypeDefClient, name: str, force: bool = False) -> None:
+    """Delete a typedef at teardown, warning instead of failing if Atlas refuses."""
+    try:
+        client.delete_typedef_by_name(name, force=force)
+    except Exception as e:
+        warnings.warn(
+            f"Failed to delete typedef {name} during cleanup: {str(e)}",
+            RuntimeWarning,
+        )
+
+
+def _create_deletable(
+    client: AtlasTypeDefClient,
+    purge: Callable[..., str],
+    create: Callable[[Any], Any],
+    typedef: Any,
+    *,
+    force: bool = False,
+) -> Any:
+    """Create a test typedef, clearing any leftover first and registering it for purge."""
+    client.delete_typedef_by_name(typedef.name, force=force)
+    created = create(typedef)
+    purge(typedef.name, force=force)
+    return created
+
+
 @pytest.fixture(scope="module")
 def atlas_rest_client(request, module_mocker) -> AnsibleServicesClient:
     """
@@ -2255,13 +2281,7 @@ def atlas_purge_typedef(
     yield _register
 
     for name, force in names:
-        try:
-            atlas_typedef_client.delete_typedef_by_name(name, force=force)
-        except Exception as e:
-            warnings.warn(
-                f"Failed to delete typedef {name} during cleanup: {str(e)}",
-                RuntimeWarning,
-            )
+        _safe_delete(atlas_typedef_client, name, force=force)
 
 
 @pytest.fixture(scope="module")
@@ -2287,13 +2307,7 @@ def atlas_existing_enum_def(
 
     yield enum_def
 
-    try:
-        atlas_typedef_client.delete_typedef_by_name(name)
-    except Exception as e:
-        warnings.warn(
-            f"Failed to delete typedef {name} during cleanup: {str(e)}",
-            RuntimeWarning,
-        )
+    _safe_delete(atlas_typedef_client, name)
 
 
 @pytest.fixture
@@ -2305,19 +2319,16 @@ def atlas_deletable_enum_def(
     """Fixture to create a function-scoped test enum typedef that can be modified or deleted."""
     name = _atlas_type_name("deletable", request.node.name)
 
-    atlas_typedef_client.delete_typedef_by_name(name)
-
-    enum_def = atlas_typedef_client.create_enum_def(
+    yield _create_deletable(
+        atlas_typedef_client,
+        atlas_purge_typedef,
+        atlas_typedef_client.create_enum_def,
         AtlasEnumDef(
             name=name,
             description="Deletable enum created by pytest - safe to delete",
             element_defs=[AtlasEnumElementDef(value="RED")],
         ),
     )
-
-    atlas_purge_typedef(name)
-
-    yield enum_def
 
 
 @pytest.fixture
@@ -2329,19 +2340,16 @@ def atlas_deletable_classification_def(
     """Fixture to create a function-scoped test classification typedef that can be modified or deleted."""
     name = _atlas_type_name("deletable", request.node.name)
 
-    atlas_typedef_client.delete_typedef_by_name(name)
-
-    classification_def = atlas_typedef_client.create_classification_def(
+    yield _create_deletable(
+        atlas_typedef_client,
+        atlas_purge_typedef,
+        atlas_typedef_client.create_classification_def,
         AtlasClassificationDef(
             name=name,
             description="Deletable classification created by pytest - safe to delete",
             attribute_defs=[AtlasAttributeDef(name="level", type_name="string")],
         ),
     )
-
-    atlas_purge_typedef(name)
-
-    yield classification_def
 
 
 @pytest.fixture
@@ -2353,19 +2361,16 @@ def atlas_deletable_entity_def(
     """Fixture to create a function-scoped test entity typedef that can be modified or deleted."""
     name = _atlas_type_name("deletable", request.node.name)
 
-    atlas_typedef_client.delete_typedef_by_name(name)
-
-    entity_def = atlas_typedef_client.create_entity_def(
+    yield _create_deletable(
+        atlas_typedef_client,
+        atlas_purge_typedef,
+        atlas_typedef_client.create_entity_def,
         AtlasEntityDef(
             name=name,
             description="Deletable entity created by pytest - safe to delete",
             attribute_defs=[AtlasAttributeDef(name="level", type_name="string")],
         ),
     )
-
-    atlas_purge_typedef(name)
-
-    yield entity_def
 
 
 @pytest.fixture
@@ -2377,19 +2382,16 @@ def atlas_deletable_struct_def(
     """Fixture to create a function-scoped test struct typedef that can be modified or deleted."""
     name = _atlas_type_name("deletable", request.node.name)
 
-    atlas_typedef_client.delete_typedef_by_name(name)
-
-    struct_def = atlas_typedef_client.create_struct_def(
+    yield _create_deletable(
+        atlas_typedef_client,
+        atlas_purge_typedef,
+        atlas_typedef_client.create_struct_def,
         AtlasStructDef(
             name=name,
             description="Deletable struct created by pytest - safe to delete",
             attribute_defs=[AtlasAttributeDef(name="street", type_name="string")],
         ),
     )
-
-    atlas_purge_typedef(name)
-
-    yield struct_def
 
 
 @pytest.fixture
@@ -2413,13 +2415,7 @@ def atlas_relationship_end_types(
     yield parent, child
 
     for name in (parent, child):
-        try:
-            atlas_typedef_client.delete_typedef_by_name(name)
-        except Exception as e:
-            warnings.warn(
-                f"Failed to delete typedef {name} during cleanup: {str(e)}",
-                RuntimeWarning,
-            )
+        _safe_delete(atlas_typedef_client, name)
 
 
 @pytest.fixture
@@ -2468,9 +2464,10 @@ def atlas_deletable_business_metadata_def(
     """Fixture to create a function-scoped test business metadata typedef that can be modified or deleted."""
     name = _atlas_type_name("deletable", request.node.name)
 
-    atlas_typedef_client.delete_typedef_by_name(name, force=True)
-
-    business_metadata_def = atlas_typedef_client.create_business_metadata_def(
+    yield _create_deletable(
+        atlas_typedef_client,
+        atlas_purge_typedef,
+        atlas_typedef_client.create_business_metadata_def,
         AtlasBusinessMetadataDef(
             name=name,
             description="Deletable business metadata created by pytest - safe to delete",
@@ -2486,8 +2483,5 @@ def atlas_deletable_business_metadata_def(
                 ),
             ],
         ),
+        force=True,
     )
-
-    atlas_purge_typedef(name, force=True)
-
-    yield business_metadata_def
