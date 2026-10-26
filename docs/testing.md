@@ -55,6 +55,9 @@ Fixtures should be defined in `tests/unit/conftest.py` or before the test functi
 - Build names with `_atlas_type_name(prefix, raw)`, which gives `ansible_test_<prefix>_<test name>` using only letters, digits and underscores
 - `atlas_purge_typedef(name, force=False)` deletes in registration order, so register a type that references others before the types it references. Pass `force=True` for business metadata, which Atlas will not delete otherwise
 - Module integration tests define their own `atlas_module_args` fixture, mapping `ATLAS_API_*` onto the module's connection arguments
+- A new simple `atlas_deletable_<category>_def` fixture calls `_create_deletable(client, purge, create, typedef, force=False)`, which clears any leftover, creates the typedef and registers it for purge. Relationship stays explicit because it also depends on `atlas_relationship_end_types`. `_safe_delete(client, name, force=False)` is the teardown delete that warns instead of failing the test
+
+**Atlas HTTP stubs** (`tests/unit/__init__.py`, imported from `ansible_collections.cloudera.services.tests.unit`): to test a module's Atlas error paths without a server, patch `FETCH_URL` with a `side_effect` that returns `http_result(mocker, status, body)` per HTTP method, and use `atlas_error_result(mocker)` for an HTTP 400 carrying `ATLAS_ERROR_MESSAGE`. Don't copy these into individual test files.
 
 ## Test Organization
 
