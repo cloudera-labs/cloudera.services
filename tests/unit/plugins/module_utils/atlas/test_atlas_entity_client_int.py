@@ -119,7 +119,9 @@ def test_get_entity_by_unique_attributes_unknown_type_fails(
             {"qualifiedName": "q"},
         )
 
-    assert "does not exist" in atlas_rest_client.module.fail_json.call_args.kwargs["msg"]
+    assert (
+        "does not exist" in atlas_rest_client.module.fail_json.call_args.kwargs["msg"]
+    )
 
 
 def test_delete_entity_is_soft(

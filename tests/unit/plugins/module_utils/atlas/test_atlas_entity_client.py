@@ -224,7 +224,9 @@ def test_create_entity(mocker):
     api_client = mocker.create_autospec(ServicesClient, instance=True)
     api_client.post.return_value = {
         "mutatedEntities": {
-            "CREATE": [{"typeName": "test_entity_type", "guid": GUID, "status": "ACTIVE"}],
+            "CREATE": [
+                {"typeName": "test_entity_type", "guid": GUID, "status": "ACTIVE"},
+            ],
         },
         "guidAssignments": {"-1": GUID},
     }
