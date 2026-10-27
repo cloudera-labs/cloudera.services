@@ -19,7 +19,7 @@ REST clients for the Apache Atlas API.
 """
 
 from dataclasses import dataclass, fields, replace
-from typing import Any, Callable, Dict, List, Optional, Union, cast
+from typing import Any, Callable, Dict, Iterable, List, Optional, Union, cast
 
 from ansible.module_utils.common.dict_transformations import (
     camel_dict_to_snake_dict,
@@ -455,23 +455,44 @@ def _convert_map_values(value: Any, convert: Any) -> Any:
     return convert(value)
 
 
-def _snake_preserving_options(value: Any) -> Any:
-    """Convert camelCase keys to snake_case at any depth, leaving free-form maps verbatim."""
+def snake_preserving_options(
+    value: Any,
+    verbatim_keys: Iterable[str] = VERBATIM_KEYS,
+    verbatim_map_keys: Iterable[str] = VERBATIM_MAP_KEYS,
+    verbatim_values: Iterable[str] = (),
+) -> Any:
+    """
+    Convert camelCase keys to snake_case at any depth.
+
+    A key in `verbatim_keys` and the value under it are left untouched. The value
+    under a key in `verbatim_values` is left untouched but the key is converted.
+    The map under a key in `verbatim_map_keys` keeps its own keys while its values
+    are converted.
+    """
+
+    def convert(item: Any) -> Any:
+        return snake_preserving_options(
+            item,
+            verbatim_keys,
+            verbatim_map_keys,
+            verbatim_values,
+        )
+
     if isinstance(value, list):
-        return [_snake_preserving_options(item) for item in value]
+        return [convert(item) for item in value]
     if isinstance(value, dict):
         return {
             (
                 key
-                if key in VERBATIM_KEYS
+                if key in verbatim_keys
                 else next(iter(camel_dict_to_snake_dict({key: None}, reversible=True)))
             ): (
                 val
-                if key in VERBATIM_KEYS
+                if key in verbatim_keys or key in verbatim_values
                 else (
-                    _convert_map_values(val, _snake_preserving_options)
-                    if key in VERBATIM_MAP_KEYS
-                    else _snake_preserving_options(val)
+                    _convert_map_values(val, convert)
+                    if key in verbatim_map_keys
+                    else convert(val)
                 )
             )
             for key, val in value.items()
@@ -515,19 +536,40 @@ def _camel_key(key: str) -> str:
     return next(iter(cast(Dict[str, Any], snake_dict_to_camel_dict({key: None}))))
 
 
-def _camel_preserving_options(value: Any) -> Any:
-    """Convert snake_case keys to camelCase at any depth, leaving free-form maps verbatim."""
+def camel_preserving_options(
+    value: Any,
+    verbatim_keys: Iterable[str] = VERBATIM_KEYS,
+    verbatim_map_keys: Iterable[str] = VERBATIM_MAP_KEYS,
+    verbatim_values: Iterable[str] = (),
+) -> Any:
+    """
+    Convert snake_case keys to camelCase at any depth.
+
+    A key in `verbatim_keys` and the value under it are left untouched. The value
+    under a key in `verbatim_values` is left untouched but the key is converted.
+    The map under a key in `verbatim_map_keys` keeps its own keys while its values
+    are converted.
+    """
+
+    def convert(item: Any) -> Any:
+        return camel_preserving_options(
+            item,
+            verbatim_keys,
+            verbatim_map_keys,
+            verbatim_values,
+        )
+
     if isinstance(value, list):
-        return [_camel_preserving_options(item) for item in value]
+        return [convert(item) for item in value]
     if isinstance(value, dict):
         return {
-            (key if key in VERBATIM_KEYS else _camel_key(key)): (
+            (key if key in verbatim_keys else _camel_key(key)): (
                 val
-                if key in VERBATIM_KEYS
+                if key in verbatim_keys or key in verbatim_values
                 else (
-                    _convert_map_values(val, _camel_preserving_options)
-                    if key in VERBATIM_MAP_KEYS
-                    else _camel_preserving_options(val)
+                    _convert_map_values(val, convert)
+                    if key in verbatim_map_keys
+                    else convert(val)
                 )
             )
             for key, val in value.items()
@@ -559,13 +601,13 @@ class _TypeDefKind:
         """Serialise a typedef into a camelCase Atlas request payload."""
         if self.to_payload is not None:
             return self.to_payload(typedef)
-        return _camel_preserving_options(to_dict(typedef))
+        return camel_preserving_options(to_dict(typedef))
 
     def parse_response(self, raw: Dict[str, Any]) -> Any:
         """Deserialise an Atlas typedef response into this category's dataclass."""
         if self.from_response is not None:
             return self.from_response(raw)
-        return from_dict(self.cls, _snake_preserving_options(raw))
+        return from_dict(self.cls, snake_preserving_options(raw))
 
 
 _ENUM = _TypeDefKind(
@@ -663,7 +705,7 @@ class AtlasTypeDefClient:
     def list_typedef_headers(self) -> List[Dict[str, Any]]:
         """List the headers (guid, name, category, service type) of all typedefs."""
         result = self.api_client.get(f"{TYPES_API}/typedefs/headers")
-        return _snake_preserving_options(result or [])
+        return snake_preserving_options(result or [])
 
     def get_typedef_by_name(self, name: str) -> Optional[Dict[str, Any]]:
         """Retrieve any typedef by name as a snake_case dict, or None if not found."""
@@ -675,7 +717,7 @@ class AtlasTypeDefClient:
         if result is None:
             return None
 
-        return _snake_preserving_options(result)
+        return snake_preserving_options(result)
 
     def create_enum_def(self, enum_def: AtlasEnumDef) -> AtlasEnumDef:
         """Create a new enum typedef."""
