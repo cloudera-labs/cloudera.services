@@ -50,9 +50,10 @@ Fixtures should be defined in `tests/unit/conftest.py` or before the test functi
 
 **Atlas fixtures** (`tests/unit/conftest.py`):
 - `atlas_typedef_client` is a module-scoped `AtlasTypeDefClient`; `atlas_purge_typedef(name)` registers a typedef name for deletion at teardown and returns the name
-- `atlas_existing_enum_def` and `atlas_deletable_{enum,classification,entity,struct}_def` follow the `existing_`/`deletable_` pattern above
+- `atlas_existing_enum_def` and `atlas_deletable_{enum,classification,entity,struct,relationship,business_metadata}_def` follow the `existing_`/`deletable_` pattern above
+- `atlas_relationship_end_types` creates the two entity types a relationship connects; list it before `atlas_purge_typedef` in a test so a registered relationship is deleted before the types it references
 - Build names with `_atlas_type_name(prefix, raw)`, which gives `ansible_test_<prefix>_<test name>` using only letters, digits and underscores
-- `atlas_purge_typedef` deletes in registration order, so register a type that references others before the types it references
+- `atlas_purge_typedef(name, force=False)` deletes in registration order, so register a type that references others before the types it references. Pass `force=True` for business metadata, which Atlas will not delete otherwise
 - Module integration tests define their own `atlas_module_args` fixture, mapping `ATLAS_API_*` onto the module's connection arguments
 
 ## Test Organization
