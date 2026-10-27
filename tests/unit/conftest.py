@@ -25,6 +25,7 @@ import pytest
 import re
 import sys
 import time
+import uuid
 import warnings
 
 from http.cookiejar import CookieJar
@@ -71,6 +72,10 @@ from ansible_collections.cloudera.services.plugins.module_utils.atlas import (
     AtlasRelationshipEndDef,
     AtlasStructDef,
     AtlasTypeDefClient,
+)
+from ansible_collections.cloudera.services.plugins.module_utils.atlas_entity import (
+    AtlasEntity,
+    AtlasEntityClient,
 )
 from ansible_collections.cloudera.services.plugins.module_utils.ranger import (
     RangerPolicy,
@@ -2485,3 +2490,105 @@ def atlas_deletable_business_metadata_def(
         ),
         force=True,
     )
+
+
+@pytest.fixture(scope="module")
+def atlas_entity_client(atlas_rest_client) -> AtlasEntityClient:
+    """Fixture to create an AtlasEntityClient instance."""
+    return AtlasEntityClient(api_client=atlas_rest_client)
+
+
+@pytest.fixture(scope="module")
+def atlas_entity_type(
+    request,
+    atlas_typedef_client,
+) -> Generator[AtlasEntityDef, None, None]:
+    """
+    Fixture to provide a module-scoped custom entity typedef for entity instance tests.
+
+    The type extends Referenceable, so `qualifiedName` is its unique attribute. It is
+    created if absent and removed at teardown only when this fixture created it.
+    Atlas refuses to delete a type that still has soft-deleted instances, so a failed
+    removal warns instead of failing the tests; the next run then reuses the type.
+    """
+    name = _atlas_type_name("entity_type", request.node.name)
+
+    existing = atlas_typedef_client.get_entity_def_by_name(name)
+    entity_def = existing or atlas_typedef_client.create_entity_def(
+        AtlasEntityDef(
+            name=name,
+            description="Entity type created by pytest - safe to delete",
+            super_types=["Referenceable"],
+            attribute_defs=[
+                AtlasAttributeDef(name="note", type_name="string", is_optional=True),
+            ],
+        ),
+    )
+
+    yield entity_def
+
+    if existing is None:
+        _safe_delete(atlas_typedef_client, name)
+
+
+@pytest.fixture
+def atlas_purge_entity(
+    atlas_entity_client,
+) -> Generator[Callable[[str], str], None, None]:
+    """
+    Factory fixture to register entity guids for cleanup after the test.
+
+    Atlas deletes softly, so teardown deletes each entity and then purges them all
+    (purging needs Atlas administrator rights; a refusal only warns).
+    """
+    guids: List[str] = []
+
+    def _register(guid: str) -> str:
+        guids.append(guid)
+        return guid
+
+    yield _register
+
+    for guid in guids:
+        try:
+            atlas_entity_client.delete_entity_by_guid(guid)
+        except Exception as e:
+            warnings.warn(
+                f"Failed to delete entity {guid} during cleanup: {str(e)}",
+                RuntimeWarning,
+            )
+
+    try:
+        atlas_entity_client.purge_entities(guids)
+    except Exception as e:
+        warnings.warn(
+            f"Failed to purge entities {guids} during cleanup: {str(e)}",
+            RuntimeWarning,
+        )
+
+
+@pytest.fixture
+def atlas_deletable_entity(
+    request,
+    atlas_entity_client,
+    atlas_entity_type,
+    atlas_purge_entity,
+) -> Generator[AtlasEntity, None, None]:
+    """Fixture to create a function-scoped test entity that can be modified or deleted."""
+    qualified_name = (
+        f"{_atlas_type_name('deletable', request.node.name)}_{uuid.uuid4().hex[:8]}"
+    )
+
+    entity = atlas_entity_client.create_entity(
+        AtlasEntity(
+            type_name=atlas_entity_type.name,
+            attributes={
+                "qualifiedName": qualified_name,
+                "note": "Deletable entity created by pytest - safe to delete",
+            },
+        ),
+    )
+
+    atlas_purge_entity(str(entity.guid))
+
+    yield entity

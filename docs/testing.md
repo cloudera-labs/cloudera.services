@@ -59,6 +59,8 @@ Fixtures should be defined in `tests/unit/conftest.py` or before the test functi
 
 **Atlas entity fixtures** (`tests/unit/conftest.py`): `atlas_entity_client` is a module-scoped `AtlasEntityClient`. `atlas_entity_type` provides a custom entity type (extending `Referenceable`, so `qualifiedName` is unique); it is created if absent and removed at teardown only when the fixture created it. `atlas_deletable_entity` creates a uniquely named entity of that type, and `atlas_purge_entity(guid)` registers a guid for cleanup. Atlas deletes softly and refuses to delete a type that still has soft-deleted instances, so teardown deletes each entity and then purges it (purging needs Atlas administrator rights; a refusal only warns). Integration tests create their own entities of the throwaway type and never touch hook-owned types such as `hive_table`.
 
+**Asserting HTTP errors in client integration tests:** the real `AnsibleServicesClient` reports an HTTP error through `module.fail_json()` rather than by raising `ServicesError` (unit tests with an autospec'd client do see `ServicesError`). The `atlas_rest_client` fixture's mock raises a fixed `AnsibleFailJson` and keeps Atlas's message in its call arguments, so expect `AnsibleFailJson` and check the text with `atlas_rest_client.module.fail_json.call_args.kwargs["msg"]`.
+
 **Atlas HTTP stubs** (`tests/unit/__init__.py`, imported from `ansible_collections.cloudera.services.tests.unit`): to test a module's Atlas error paths without a server, patch `FETCH_URL` with a `side_effect` that returns `http_result(mocker, status, body)` per HTTP method, and use `atlas_error_result(mocker)` for an HTTP 400 carrying `ATLAS_ERROR_MESSAGE`. Don't copy these into individual test files.
 
 ## Test Organization
