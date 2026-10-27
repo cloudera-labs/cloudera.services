@@ -27,7 +27,7 @@ options:
   name:
     description:
       - Name of the classification type definition.
-      - Required when O(state=present).
+      - Required when O(state=present) or O(state=absent).
     type: str
   description:
     description:
@@ -336,6 +336,7 @@ class AtlasClassificationDefModule(ServicesModule):
             ),
             required_if=[
                 ["state", "present", ["name"]],
+                ["state", "absent", ["name"]],
             ],
             supports_check_mode=True,
         )

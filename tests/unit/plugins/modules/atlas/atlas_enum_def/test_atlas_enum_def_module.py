@@ -18,6 +18,8 @@ from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
 
+import json
+
 import pytest
 
 from ansible_collections.cloudera.services.tests.unit import (
@@ -224,3 +226,152 @@ def test_atlas_enum_def_module_present_requires_name(module_args):
 
     with pytest.raises(AnsibleFailJson):
         atlas_enum_def.main()
+
+
+FETCH_URL = (
+    "ansible_collections.cloudera.services.plugins.module_utils.common.fetch_url"
+)
+
+ATLAS_ERROR_MESSAGE = "ATLAS-400-00-0AB: type is referenced by other types"
+
+
+def _http(mocker, status, body=None):
+    """Build a fetch_url (response, info) result for the given status and JSON body."""
+    payload = json.dumps(body if body is not None else {})
+    resp = mocker.Mock()
+    resp.read.return_value = payload.encode("utf-8")
+    return resp, {"status": status, "msg": f"HTTP {status}", "body": payload}
+
+
+def _atlas_error(mocker):
+    return _http(
+        mocker,
+        400,
+        {"errorCode": "ATLAS-400-00-0AB", "errorMessage": ATLAS_ERROR_MESSAGE},
+    )
+
+
+EXISTING_JSON = {
+    "category": "ENUM",
+    "guid": "enum-guid-1",
+    "name": "test_enum",
+    "elementDefs": [{"value": "RED", "ordinal": 1}],
+}
+
+
+def test_atlas_enum_def_module_absent_requires_name(module_args, mocker):
+    """Test absent without a name fails instead of silently doing nothing."""
+    mock_get = mocker.patch(f"{CLIENT}.get_enum_def_by_name")
+    mock_delete = mocker.patch(f"{CLIENT}.delete_typedef_by_name")
+
+    module_args(_args(state="absent"))
+
+    with pytest.raises(AnsibleFailJson):
+        atlas_enum_def.main()
+
+    mock_get.assert_not_called()
+    mock_delete.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"element_defs": [{"ordinal": 1}]},
+        {"element_defs": [{"value": "RED", "ordinal": "first"}]},
+        {"super_types": ["parent"]},
+        {"state": "unknown"},
+        {"propagate_tags": "NONE"},
+    ],
+    ids=[
+        "element-missing-value",
+        "element-non-integer-ordinal",
+        "entity-only-parameter",
+        "invalid-state",
+        "relationship-only-parameter",
+    ],
+)
+def test_atlas_enum_def_module_invalid_arguments_fail(module_args, mocker, extra):
+    """Test invalid arguments fail before any Atlas call is made."""
+    mock_get = mocker.patch(f"{CLIENT}.get_enum_def_by_name")
+
+    module_args(_args(name="test_enum", **extra))
+
+    with pytest.raises(AnsibleFailJson):
+        atlas_enum_def.main()
+
+    mock_get.assert_not_called()
+
+
+def test_atlas_enum_def_module_create_atlas_error_fails(module_args, mocker):
+    """Test an Atlas 400 on create fails the module with Atlas's message."""
+
+    def fake_fetch_url(module, url, method="GET", **kwargs):
+        if method == "GET":
+            return _http(mocker, 404)
+        assert method == "POST"
+        return _atlas_error(mocker)
+
+    mocker.patch(FETCH_URL, side_effect=fake_fetch_url)
+
+    module_args(_args(name="test_enum"))
+
+    with pytest.raises(AnsibleFailJson) as e:
+        atlas_enum_def.main()
+
+    assert ATLAS_ERROR_MESSAGE in e.value["msg"]
+
+
+def test_atlas_enum_def_module_update_atlas_error_fails(module_args, mocker):
+    """Test an Atlas 400 on update fails the module with Atlas's message."""
+
+    def fake_fetch_url(module, url, method="GET", **kwargs):
+        if method == "GET":
+            return _http(mocker, 200, EXISTING_JSON)
+        assert method == "PUT"
+        return _atlas_error(mocker)
+
+    mocker.patch(FETCH_URL, side_effect=fake_fetch_url)
+
+    module_args(_args(name="test_enum", description="new"))
+
+    with pytest.raises(AnsibleFailJson) as e:
+        atlas_enum_def.main()
+
+    assert ATLAS_ERROR_MESSAGE in e.value["msg"]
+
+
+def test_atlas_enum_def_module_delete_atlas_error_fails(module_args, mocker):
+    """Test an Atlas 400 on delete fails the module with Atlas's message."""
+
+    def fake_fetch_url(module, url, method="GET", **kwargs):
+        if method == "GET":
+            return _http(mocker, 200, EXISTING_JSON)
+        assert method == "DELETE"
+        return _atlas_error(mocker)
+
+    mocker.patch(FETCH_URL, side_effect=fake_fetch_url)
+
+    module_args(_args(name="test_enum", state="absent"))
+
+    with pytest.raises(AnsibleFailJson) as e:
+        atlas_enum_def.main()
+
+    assert ATLAS_ERROR_MESSAGE in e.value["msg"]
+
+
+def test_atlas_enum_def_module_unexpected_response_fails(module_args, mocker):
+    """Test a 200 response lacking the written def fails the module cleanly."""
+
+    def fake_fetch_url(module, url, method="GET", **kwargs):
+        if method == "GET":
+            return _http(mocker, 404)
+        return _http(mocker, 200, {"enumDefs": []})
+
+    mocker.patch(FETCH_URL, side_effect=fake_fetch_url)
+
+    module_args(_args(name="test_enum"))
+
+    with pytest.raises(AnsibleFailJson) as e:
+        atlas_enum_def.main()
+
+    assert "test_enum" in e.value["msg"]

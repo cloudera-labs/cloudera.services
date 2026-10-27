@@ -61,7 +61,7 @@ All Atlas type definitions share one client, `AtlasTypeDefClient` in `plugins/mo
 - Reuse `delete_typedef_by_name()`; deleting a missing typedef is a no-op
 
 Conventions:
-- **Bundles:** Atlas writes go to `/api/atlas/v2/types/typedefs` as a bundle, `{"<category>Defs": [def]}`. The client sends one def and keeps the module single-resource. Pick the written def out of the response by name with `_written_def()` (every category except enum and classification uses it), which raises `ServicesError` when the bundle lacks it
+- **Bundles:** Atlas writes go to `/api/atlas/v2/types/typedefs` as a bundle, `{"<category>Defs": [def]}`. The client sends one def and keeps the module single-resource. Pick the written def out of the response by name with `_written_def()` (every category uses it), which raises `ServicesError` when the bundle lacks it
 - **Not found:** a 404 on read is squelched to `None`
 - **Verbatim maps:** free-form maps (`options`, `params`) and maps keyed by user-chosen names (`business_attribute_defs`) must not be camelCased or snake_cased. Add new ones to `VERBATIM_KEYS` or `VERBATIM_MAP_KEYS`
 - **Idempotence:** Atlas fills in defaults on the server (attribute flags, enum ordinals). `build_from_params(..., existing=existing)` replaces nested lists wholesale, so call `align_attribute_defs()`, `align_enum_elements()` or, for a relationship's `end_def1`/`end_def2`, `align_relationship_end_def()` before `diff_dict()`. Otherwise unset fields register as a change on every run
