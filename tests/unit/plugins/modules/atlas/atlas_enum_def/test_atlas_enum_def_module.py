@@ -18,13 +18,15 @@ from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
 
-import json
-
 import pytest
 
 from ansible_collections.cloudera.services.tests.unit import (
+    ATLAS_ERROR_MESSAGE,
+    FETCH_URL,
     AnsibleExitJson,
     AnsibleFailJson,
+    atlas_error_result,
+    http_result,
 )
 
 from ansible_collections.cloudera.services.plugins.modules import atlas_enum_def
@@ -228,29 +230,6 @@ def test_atlas_enum_def_module_present_requires_name(module_args):
         atlas_enum_def.main()
 
 
-FETCH_URL = (
-    "ansible_collections.cloudera.services.plugins.module_utils.common.fetch_url"
-)
-
-ATLAS_ERROR_MESSAGE = "ATLAS-400-00-0AB: type is referenced by other types"
-
-
-def _http(mocker, status, body=None):
-    """Build a fetch_url (response, info) result for the given status and JSON body."""
-    payload = json.dumps(body if body is not None else {})
-    resp = mocker.Mock()
-    resp.read.return_value = payload.encode("utf-8")
-    return resp, {"status": status, "msg": f"HTTP {status}", "body": payload}
-
-
-def _atlas_error(mocker):
-    return _http(
-        mocker,
-        400,
-        {"errorCode": "ATLAS-400-00-0AB", "errorMessage": ATLAS_ERROR_MESSAGE},
-    )
-
-
 EXISTING_JSON = {
     "category": "ENUM",
     "guid": "enum-guid-1",
@@ -307,9 +286,9 @@ def test_atlas_enum_def_module_create_atlas_error_fails(module_args, mocker):
 
     def fake_fetch_url(module, url, method="GET", **kwargs):
         if method == "GET":
-            return _http(mocker, 404)
+            return http_result(mocker, 404)
         assert method == "POST"
-        return _atlas_error(mocker)
+        return atlas_error_result(mocker)
 
     mocker.patch(FETCH_URL, side_effect=fake_fetch_url)
 
@@ -326,9 +305,9 @@ def test_atlas_enum_def_module_update_atlas_error_fails(module_args, mocker):
 
     def fake_fetch_url(module, url, method="GET", **kwargs):
         if method == "GET":
-            return _http(mocker, 200, EXISTING_JSON)
+            return http_result(mocker, 200, EXISTING_JSON)
         assert method == "PUT"
-        return _atlas_error(mocker)
+        return atlas_error_result(mocker)
 
     mocker.patch(FETCH_URL, side_effect=fake_fetch_url)
 
@@ -345,9 +324,9 @@ def test_atlas_enum_def_module_delete_atlas_error_fails(module_args, mocker):
 
     def fake_fetch_url(module, url, method="GET", **kwargs):
         if method == "GET":
-            return _http(mocker, 200, EXISTING_JSON)
+            return http_result(mocker, 200, EXISTING_JSON)
         assert method == "DELETE"
-        return _atlas_error(mocker)
+        return atlas_error_result(mocker)
 
     mocker.patch(FETCH_URL, side_effect=fake_fetch_url)
 
@@ -364,8 +343,8 @@ def test_atlas_enum_def_module_unexpected_response_fails(module_args, mocker):
 
     def fake_fetch_url(module, url, method="GET", **kwargs):
         if method == "GET":
-            return _http(mocker, 404)
-        return _http(mocker, 200, {"enumDefs": []})
+            return http_result(mocker, 404)
+        return http_result(mocker, 200, {"enumDefs": []})
 
     mocker.patch(FETCH_URL, side_effect=fake_fetch_url)
 

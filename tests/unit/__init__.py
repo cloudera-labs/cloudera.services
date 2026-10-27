@@ -189,3 +189,28 @@ class TestServicesClient(ServicesClient):
             headers=self.headers,
             **kwargs,
         )
+
+
+# Patch target for stubbing HTTP calls made through ServicesClient.
+FETCH_URL = (
+    "ansible_collections.cloudera.services.plugins.module_utils.common.fetch_url"
+)
+
+ATLAS_ERROR_MESSAGE = "ATLAS-400-00-0AB: type is referenced by other types"
+
+
+def http_result(mocker, status, body=None):
+    """Build a fetch_url (response, info) result for the given status and JSON body."""
+    payload = json.dumps(body if body is not None else {})
+    resp = mocker.Mock()
+    resp.read.return_value = payload.encode("utf-8")
+    return resp, {"status": status, "msg": f"HTTP {status}", "body": payload}
+
+
+def atlas_error_result(mocker):
+    """Build a fetch_url result for an Atlas HTTP 400 carrying ATLAS_ERROR_MESSAGE."""
+    return http_result(
+        mocker,
+        400,
+        {"errorCode": "ATLAS-400-00-0AB", "errorMessage": ATLAS_ERROR_MESSAGE},
+    )
