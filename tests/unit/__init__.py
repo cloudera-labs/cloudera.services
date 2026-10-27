@@ -18,7 +18,7 @@ import json
 
 from collections.abc import Mapping
 from functools import wraps
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urlencode
 from urllib.error import HTTPError
 from http.client import HTTPResponse
@@ -142,7 +142,7 @@ class TestServicesClient(ServicesClient):
         self,
         path: str,
         params: Optional[Dict[str, Any]] = None,
-        data: Optional[Dict[str, Any]] = None,
+        data: Optional[Union[Dict[str, Any], List[Any]]] = None,
         format: str = "json",
         squelch: Dict[int, Any] = {},
         passthru: List[int] = [],
@@ -160,7 +160,7 @@ class TestServicesClient(ServicesClient):
         self,
         path: str,
         params: Optional[Dict[str, Any]] = None,
-        data: Optional[Dict[str, Any]] = None,
+        data: Optional[Union[Dict[str, Any], List[Any]]] = None,
         squelch: Dict[int, Any] = {},
         passthru: List[int] = [],
         **kwargs,
@@ -177,7 +177,7 @@ class TestServicesClient(ServicesClient):
         self,
         path: str,
         params: Optional[Dict[str, Any]] = None,
-        data: Optional[Dict[str, Any]] = None,
+        data: Optional[Union[Dict[str, Any], List[Any]]] = None,
         squelch: Dict[int, Any] = {},
         passthru: List[int] = [],
         **kwargs,
