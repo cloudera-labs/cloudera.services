@@ -27,7 +27,7 @@ options:
   name:
     description:
       - Name of the enum type definition.
-      - Required when O(state=present).
+      - Required when O(state=present) or O(state=absent).
     type: str
   description:
     description:
@@ -197,6 +197,7 @@ class AtlasEnumDefModule(ServicesModule):
             ),
             required_if=[
                 ["state", "present", ["name"]],
+                ["state", "absent", ["name"]],
             ],
             supports_check_mode=True,
         )
