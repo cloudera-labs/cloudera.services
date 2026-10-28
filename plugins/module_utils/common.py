@@ -173,7 +173,7 @@ def overlay(
             f"Expected dataclass instance for override, got {type(override)}",
         )
 
-    if type(base) != type(override):
+    if type(base) is not type(override):
         raise TypeError(
             f"Cannot overlay different dataclass types: {type(base)} vs {type(override)}",
         )
@@ -345,7 +345,7 @@ def diff_dict(
 
         # If both are dataclasses, recursively compare fields
         if is_dataclass(prev_val) and is_dataclass(new_val):
-            if type(prev_val) != type(new_val):
+            if type(prev_val) is not type(new_val):
                 # Different types, convert both to dicts
                 prev_result = (
                     to_dict(prev_val) if not isinstance(prev_val, type) else prev_val
@@ -475,7 +475,7 @@ def diff_dict(
             f"Expected dataclass instance for next, got {type(next)}",
         )
 
-    if type(prev) != type(next):
+    if type(prev) is not type(next):
         raise TypeError(
             f"Cannot compare different dataclass types: {type(prev)} vs {type(next)}",
         )
@@ -657,7 +657,7 @@ class ServicesClient:
         self,
         path: str,
         params: Optional[Dict[str, Any]] = None,
-        data: Optional[Dict[str, Any]] = None,
+        data: Optional[Union[Dict[str, Any], List[Any]]] = None,
         squelch: Dict[int, Any] = {},
         passthru: List[int] = [],
         **kwargs,
@@ -722,7 +722,7 @@ class ServicesClient:
         self,
         path: str,
         params: Optional[Dict[str, Any]] = None,
-        data: Optional[Dict[str, Any]] = None,
+        data: Optional[Union[Dict[str, Any], List[Any]]] = None,
         squelch: Dict[int, Any] = {},
         passthru: List[int] = [],
         **kwargs,
@@ -745,7 +745,7 @@ class ServicesClient:
         self,
         path: str,
         params: Optional[Dict[str, Any]] = None,
-        data: Optional[Dict[str, Any]] = None,
+        data: Optional[Union[Dict[str, Any], List[Any]]] = None,
         squelch: Dict[int, Any] = {},
         passthru: List[int] = [],
         **kwargs,
@@ -768,7 +768,7 @@ class ServicesClient:
         self,
         path: str,
         params: Optional[Dict[str, Any]] = None,
-        data: Optional[Dict[str, Any]] = None,
+        data: Optional[Union[Dict[str, Any], List[Any]]] = None,
         format: str = "json",
         squelch: Dict[int, Any] = {},
         passthru: List[int] = [],
@@ -792,7 +792,7 @@ class ServicesClient:
         self,
         path: str,
         params: Optional[Dict[str, Any]] = None,
-        data: Optional[Dict[str, Any]] = None,
+        data: Optional[Union[Dict[str, Any], List[Any]]] = None,
         squelch: Dict[int, Any] = {},
         passthru: List[int] = [],
         **kwargs,
@@ -1258,7 +1258,7 @@ class AnsibleServicesClient(ServicesClient):
                                 if k in error_data:
                                     error_message = error_data[k]
                                     break
-                        except:
+                        except Exception:
                             error_message = f"{info.get('msg', 'Unknown error; unparseable response')}"
                     else:
                         try:
@@ -1266,7 +1266,7 @@ class AnsibleServicesClient(ServicesClient):
                                 "msg",
                                 "Unknown error; no response body",
                             )
-                        except:
+                        except Exception:
                             pass
 
                     # Retry on connection-level failures (fetch_url reports a
@@ -1316,7 +1316,7 @@ class AnsibleServicesClient(ServicesClient):
         self,
         path: str,
         params: Optional[Dict[str, Any]] = None,
-        data: Optional[Dict[str, Any]] = None,
+        data: Optional[Union[Dict[str, Any], List[Any]]] = None,
         squelch: Dict[int, Any] = {},
         passthru: List[int] = [],
         **kwargs,
@@ -1371,7 +1371,7 @@ class AnsibleServicesClient(ServicesClient):
         self,
         path: str,
         params: Optional[Dict[str, Any]] = None,
-        data: Optional[Dict[str, Any]] = None,
+        data: Optional[Union[Dict[str, Any], List[Any]]] = None,
         squelch: Dict[int, Any] = {},
         passthru: List[int] = [],
         **kwargs,
@@ -1390,7 +1390,7 @@ class AnsibleServicesClient(ServicesClient):
         self,
         path: str,
         params: Optional[Dict[str, Any]] = None,
-        data: Optional[Dict[str, Any]] = None,
+        data: Optional[Union[Dict[str, Any], List[Any]]] = None,
         squelch: Dict[int, Any] = {},
         passthru: List[int] = [],
         **kwargs,
@@ -1409,7 +1409,7 @@ class AnsibleServicesClient(ServicesClient):
         self,
         path: str,
         params: Optional[Dict[str, Any]] = None,
-        data: Optional[Dict[str, Any]] = None,
+        data: Optional[Union[Dict[str, Any], List[Any]]] = None,
         format: str = "json",
         squelch: Dict[int, Any] = {},
         passthru: List[int] = [],
@@ -1431,7 +1431,7 @@ class AnsibleServicesClient(ServicesClient):
         self,
         path: str,
         params: Optional[Dict[str, Any]] = None,
-        data: Optional[Dict[str, Any]] = None,
+        data: Optional[Union[Dict[str, Any], List[Any]]] = None,
         squelch: Dict[int, Any] = {},
         passthru: List[int] = [],
         **kwargs,
