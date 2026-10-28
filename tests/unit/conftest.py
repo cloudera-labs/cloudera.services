@@ -2596,6 +2596,8 @@ def atlas_deletable_entity(
     atlas_purge_entity(str(entity.guid))
 
     yield entity
+
+
 # ---------------------------------------------------------------------------
 # Streams Messaging Manager (SMM) Fixtures
 # ---------------------------------------------------------------------------
