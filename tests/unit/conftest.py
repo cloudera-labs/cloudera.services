@@ -86,6 +86,10 @@ from ansible_collections.cloudera.services.plugins.module_utils.ranger import (
     RangerService,
     RangerServiceClient,
 )
+from ansible_collections.cloudera.services.plugins.module_utils.smm import (
+    SmmKafkaTopic,
+    SmmKafkaTopicClient,
+)
 from ansible_collections.cloudera.services.plugins.module_utils.ml import (
     CmlServicesClient,
     MlProject,
@@ -2592,3 +2596,185 @@ def atlas_deletable_entity(
     atlas_purge_entity(str(entity.guid))
 
     yield entity
+# ---------------------------------------------------------------------------
+# Streams Messaging Manager (SMM) Fixtures
+# ---------------------------------------------------------------------------
+
+
+def _smm_topic_name(prefix: str, raw: str) -> str:
+    """Build a valid Kafka topic name (letters, digits, '.', '_' and '-') from a test name."""
+    sanitized = re.sub(r"[^a-z0-9._-]+", "-", raw.lower()).strip("-")
+    return f"ansible-test-{prefix}-{sanitized}"[:249]
+
+
+def _smm_wait_until(
+    predicate: Callable[[], bool],
+    timeout: float = 30.0,
+    interval: float = 1.0,
+) -> bool:
+    """Poll until predicate is true, since Kafka creates and deletes topics asynchronously."""
+    deadline = time.monotonic() + timeout
+    while True:
+        if predicate():
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(interval)
+
+
+@pytest.fixture(scope="session")
+def smm_wait_until() -> Callable[..., bool]:
+    """Provide a helper that polls a condition until it is true or a timeout expires."""
+    return _smm_wait_until
+
+
+@pytest.fixture(scope="module")
+def smm_rest_client(request) -> AnsibleServicesClient:
+    """
+    Fixture to create an AnsibleServicesClient instance for the Streams
+    Messaging Manager API. This fixture's Ansible module is used for set up and
+    teardown of SMM test resources (module-scope).
+
+    SMM authenticates with HTTP basic auth, which fetch_url performs natively
+    from the url_username / url_password / force_basic_auth module parameters.
+
+    It checks for the following required environment variables set at the module
+    and skips tests if any are missing:
+    - SMM_API_URL
+    - SMM_API_USERNAME
+    - SMM_API_PASSWORD
+    """
+    required_vars = getattr(request.module, "REQUIRED_ENV_VARS", [])
+    missing = [var for var in required_vars if var not in os.environ]
+    if missing:
+        pytest.skip(f"Missing env vars: {', '.join(missing)}")
+
+    module = Mock()
+    module.params = {}
+    module.fail_json = Mock(
+        side_effect=AnsibleFailJson({"msg": "fail_json called"}),
+    )
+    module.exit_json = Mock(
+        side_effect=AnsibleExitJson({"msg": "exit_json called"}),
+    )
+
+    module.params.update(
+        {
+            "url": os.environ["SMM_API_URL"],
+            "url_username": os.environ["SMM_API_USERNAME"],
+            "url_password": os.environ["SMM_API_PASSWORD"],
+            "force_basic_auth": True,
+            "validate_certs": os.environ.get("SMM_VALIDATE_CERTS", "false").lower()
+            == "true",
+        },
+    )
+
+    # Create the AnsibleServicesClient instance
+    return AnsibleServicesClient(
+        module=module,
+        cookies=CookieJar(),
+    )
+
+
+@pytest.fixture(scope="module")
+def smm_topic_client(smm_rest_client) -> SmmKafkaTopicClient:
+    """Fixture to create a SmmKafkaTopicClient instance."""
+    return SmmKafkaTopicClient(api_client=smm_rest_client)
+
+
+def _smm_remove_topic(client: SmmKafkaTopicClient, name: str) -> None:
+    """Delete a topic and wait for Kafka to finish removing it."""
+    client.delete_topic(name)
+    _smm_wait_until(lambda: client.get_topic(name) is None)
+
+
+def _smm_create_topic(
+    client: SmmKafkaTopicClient,
+    topic: SmmKafkaTopic,
+) -> SmmKafkaTopic:
+    """Create a topic, replacing any stale one, and wait until it is visible."""
+    if client.get_topic(topic.name) is not None:
+        _smm_remove_topic(client, topic.name)
+
+    client.create_topic(topic)
+    _smm_wait_until(lambda: client.get_topic(topic.name) is not None)
+    return client.get_topic(topic.name)
+
+
+@pytest.fixture
+def purge_smm_topic(
+    smm_topic_client,
+) -> Generator[Callable[[str], str], None, None]:
+    """Factory fixture to register topic names for cleanup after the test."""
+    topic_names: List[str] = []
+
+    def _register(name: str) -> str:
+        topic_names.append(name)
+        return name
+
+    yield _register
+
+    # Clean up after the test
+    for topic_name in topic_names:
+        try:
+            smm_topic_client.delete_topic(topic_name)
+        except Exception as e:
+            log.info(f"Failed to delete topic {topic_name} during cleanup: {str(e)}")
+
+
+@pytest.fixture(scope="module")
+def existing_smm_topic(
+    request,
+    smm_topic_client,
+) -> Generator[SmmKafkaTopic, None, None]:
+    """Fixture to create a module-scoped test topic for read-only tests."""
+    topic = _smm_create_topic(
+        smm_topic_client,
+        SmmKafkaTopic(
+            name=_smm_topic_name("existing", request.node.name),
+            partitions=1,
+            replication_factor=1,
+            configs={"retention.ms": "86400000"},
+        ),
+    )
+
+    yield topic
+
+    # Clean up after the test (module scope, cannot use purge_smm_topic fixture)
+    try:
+        smm_topic_client.delete_topic(topic.name)
+    except Exception as e:
+        log.info(f"Failed to delete topic {topic.name} during cleanup: {str(e)}")
+
+
+@pytest.fixture
+def deletable_smm_topic(
+    request,
+    smm_topic_client,
+    purge_smm_topic,
+) -> Generator[SmmKafkaTopic, None, None]:
+    """Fixture to create a function-scoped test topic that can be modified or deleted."""
+    topic = _smm_create_topic(
+        smm_topic_client,
+        SmmKafkaTopic(
+            name=_smm_topic_name("deletable", request.node.name),
+            partitions=1,
+            replication_factor=1,
+            configs={"retention.ms": "86400000"},
+        ),
+    )
+
+    # Register for deletion after test
+    purge_smm_topic(topic.name)
+
+    yield topic
+
+
+@pytest.fixture
+def smm_topic_name(request) -> Callable[[str], str]:
+    """Factory fixture that builds a valid, test-specific Kafka topic name."""
+
+    def _name(prefix: str) -> str:
+        return _smm_topic_name(prefix, request.node.name)
+
+    return _name

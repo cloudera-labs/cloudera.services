@@ -72,3 +72,6 @@ action_groups:
     - atlas_relationship_def
     - atlas_struct_def
     - atlas_typedef_info
+  smm:
+    - smm_kafka_topic
+    - smm_kafka_topic_info

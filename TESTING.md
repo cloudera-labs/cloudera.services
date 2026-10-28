@@ -24,6 +24,13 @@ _For Apache Ranger_
 - `RANGER_API_USERNAME`
 - `RANGER_API_PASSWORD`
 
+_For Cloudera Streams Messaging Manager_
+
+- `SMM_API_URL`
+- `SMM_API_USERNAME`
+- `SMM_API_PASSWORD`
+- `SMM_VALIDATE_CERTS` (optional, default `false`)
+
 _For Apache Atlas_
 
 - `ATLAS_API_URL`
