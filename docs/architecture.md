@@ -70,6 +70,15 @@ Conventions:
 - **Idempotence:** Atlas fills in defaults on the server (attribute flags, enum ordinals). `build_from_params(..., existing=existing)` replaces nested lists wholesale, so call `align_attribute_defs()`, `align_enum_elements()` or, for a relationship's `end_def1`/`end_def2`, `align_relationship_end_def()` before `diff_dict()`. Otherwise unset fields register as a change on every run. These share `_fill_unset()` (take each unset field from the existing item; an explicit `None` counts as set) and `_align_by_key()`; a new keyed list is one more `_align_by_key(incoming, existing, "<key>")` call
 - **Forced deletes:** `delete_typedef_by_name(name, force=True)` sends `?force=true`. Atlas requires it to delete business metadata that has non-indexable attributes, so `atlas_business_metadata_def` exposes it as an opt-in `force` option
 
+## Apache Atlas Entities
+
+Entity instances (the objects typedefs describe, such as a `hive_table`) use a separate client, `AtlasEntityClient` in `plugins/module_utils/atlas_entity.py`, with one module per aspect: `atlas_entity_info` looks an entity up, and later modules manage its labels, business metadata, classifications and the entity itself. It reuses the case-conversion helpers from `atlas.py`.
+
+- **Identity:** an entity is addressed by `guid`, or by `type_name` plus unique attributes (usually `qualified_name`, shorthand for the `qualifiedName` attribute), sent as `attr:<name>=<value>` query parameters. Quote any value used in a URL path with `urllib.parse.quote(value, safe="")`
+- **Verbatim maps:** `attributes`, `relationship_attributes`, `custom_attributes` and `business_attributes` hold Atlas attribute names (`qualifiedName`), which must never be snake-cased. Pass them as `verbatim_values` to `snake_preserving_options()` / `camel_preserving_options()` (`ENTITY_VERBATIM_VALUES`): the map's own key is converted, its contents are not. This differs from `verbatim_keys`, which also leaves the key itself alone
+- **Lookups:** a 404 is squelched to `None` on reads only. An unknown *type* is an HTTP 400, so a mistyped type name fails instead of reading as a missing entity. A lookup by unique attributes never returns a deleted entity, but a lookup by guid does, with `status: DELETED`
+- **Response shape:** validate it before `from_dict`; a malformed body must raise `ServicesError`, not a `TypeError` for a missing required field
+
 ## State Management
 
 - Standard states: `present`, `absent`

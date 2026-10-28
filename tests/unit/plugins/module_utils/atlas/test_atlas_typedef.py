@@ -38,12 +38,14 @@ from ansible_collections.cloudera.services.plugins.module_utils.atlas import (
     AtlasTypeDefClient,
     align_attribute_defs,
     align_enum_elements,
+    camel_preserving_options,
     extract_business_metadata_def_params,
     extract_classification_def_params,
     extract_entity_def_params,
     extract_enum_def_params,
     extract_relationship_def_params,
     extract_struct_def_params,
+    snake_preserving_options,
 )
 
 # Atlas returns typedef objects with camelCase keys.
@@ -521,3 +523,74 @@ def test_align_enum_elements_fills_unset_ordinal_and_description():
         AtlasEnumElementDef(value="RED", ordinal=9, description="r"),
     ]
     assert aligned[1] is blue
+
+
+def test_preserving_options_converters_keep_default_verbatim_keys():
+    """Test options and params stay verbatim by default, in both directions."""
+    camel = {
+        "fooBar": 1,
+        "options": {"kK": 1},
+        "items": [{"params": {"pK": 2}, "innerKey": 3}],
+    }
+    snake = {
+        "foo_bar": 1,
+        "options": {"kK": 1},
+        "items": [{"params": {"pK": 2}, "inner_key": 3}],
+    }
+
+    assert snake_preserving_options(camel) == snake
+    assert camel_preserving_options(snake) == camel
+
+
+def test_preserving_options_converters_accept_custom_verbatim_keys():
+    """Test a custom verbatim set replaces the defaults and applies at every depth."""
+    camel = {
+        "typeName": "t",
+        "options": {"kK": 1},
+        "attributes": {"qualifiedName": "q", "nestedKey": {"innerKey": 1}},
+        "classifications": [
+            {"typeName": "c", "attributes": {"levelOne": {"levelTwo": 2}}},
+        ],
+    }
+    snake = {
+        "type_name": "t",
+        "options": {"k_k": 1},
+        "attributes": {"qualifiedName": "q", "nestedKey": {"innerKey": 1}},
+        "classifications": [
+            {"type_name": "c", "attributes": {"levelOne": {"levelTwo": 2}}},
+        ],
+    }
+
+    assert snake_preserving_options(camel, verbatim_keys=("attributes",)) == snake
+    assert camel_preserving_options(snake, verbatim_keys=("attributes",)) == camel
+
+
+def test_preserving_options_converters_accept_custom_verbatim_map_keys():
+    """Test the keys of a verbatim map are kept while its values are converted."""
+    camel = {"groups": {"My_Group": {"someKey": 1}}}
+    snake = {"groups": {"My_Group": {"some_key": 1}}}
+
+    assert snake_preserving_options(camel, verbatim_map_keys=("groups",)) == snake
+    assert camel_preserving_options(snake, verbatim_map_keys=("groups",)) == camel
+
+
+def test_preserving_options_converters_accept_verbatim_values():
+    """Test the key is converted while the value under it is left untouched."""
+    camel = {
+        "typeName": "t",
+        "businessAttributes": {"myBm": {"ownerName": "alice"}},
+        "labels": ["x"],
+    }
+    snake = {
+        "type_name": "t",
+        "business_attributes": {"myBm": {"ownerName": "alice"}},
+        "labels": ["x"],
+    }
+    options = dict(
+        verbatim_keys=(),
+        verbatim_map_keys=(),
+        verbatim_values=("businessAttributes", "business_attributes"),
+    )
+
+    assert snake_preserving_options(camel, **options) == snake
+    assert camel_preserving_options(snake, **options) == camel
