@@ -127,13 +127,13 @@ topics:
               returned: always
         replicas:
           description:
-            - Brokers holding a replica of the partition, in the same format as O(topics[].partition_details[].leader).
+            - Brokers holding a replica of the partition, in the same format as RV(topics[].partition_details[].leader).
           type: list
           elements: dict
           returned: always
         isr:
           description:
-            - Brokers whose replica is in sync, in the same format as O(topics[].partition_details[].leader).
+            - Brokers whose replica is in sync, in the same format as RV(topics[].partition_details[].leader).
           type: list
           elements: dict
           returned: always
