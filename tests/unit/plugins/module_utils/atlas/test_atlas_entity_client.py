@@ -28,6 +28,7 @@ from ansible_collections.cloudera.services.plugins.module_utils.atlas_entity imp
     AtlasClassification,
     AtlasEntity,
     AtlasEntityClient,
+    validate_labels,
 )
 
 GUID = "fc0fd256-be16-4775-99ad-9e0b7e304ae5"
@@ -316,3 +317,58 @@ def test_purge_entities_without_guids_makes_no_request(mocker):
     AtlasEntityClient(api_client).purge_entities([])
 
     api_client.put.assert_not_called()
+
+
+def test_set_entity_labels(mocker):
+    """Test labels are set by POSTing the whole list to the entity's labels endpoint."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.post.return_value = None
+
+    assert AtlasEntityClient(api_client).set_entity_labels(GUID, ["a", "b"]) is None
+
+    api_client.post.assert_called_once_with(
+        f"/api/atlas/v2/entity/guid/{GUID}/labels",
+        data=["a", "b"],
+    )
+
+
+def test_set_entity_labels_empty_list_clears(mocker):
+    """Test an empty list is sent as is, because POSTing [] clears every label."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.post.return_value = None
+
+    AtlasEntityClient(api_client).set_entity_labels(GUID, [])
+
+    api_client.post.assert_called_once_with(
+        f"/api/atlas/v2/entity/guid/{GUID}/labels",
+        data=[],
+    )
+
+
+def test_set_entity_labels_quotes_guid(mocker):
+    """Test the guid is quoted so it cannot alter the request path."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+
+    AtlasEntityClient(api_client).set_entity_labels("a/b?c", ["a"])
+
+    assert api_client.post.call_args.args[0] == (
+        "/api/atlas/v2/entity/guid/a%2Fb%3Fc/labels"
+    )
+
+
+@pytest.mark.parametrize("label", ["a", "A1", "with_underscore", "with-dash", "9"])
+def test_validate_labels_accepts_atlas_labels(label):
+    """Test alphanumeric labels with underscores and dashes pass."""
+    validate_labels([label])
+
+
+@pytest.mark.parametrize(
+    "label",
+    ["", "has space", "dot.ted", "slash/ed", "colon:ed", "naïve", "tab\t"],
+)
+def test_validate_labels_rejects_invalid_labels(label):
+    """Test a label Atlas would reject (ATLAS-400-00-090) is refused with its name."""
+    with pytest.raises(ServicesError) as e:
+        validate_labels(["ok", label])
+
+    assert repr(label) in str(e.value) or label in str(e.value)

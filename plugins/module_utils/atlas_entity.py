@@ -18,6 +18,7 @@
 REST client for Apache Atlas entity instances.
 """
 
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 from urllib.parse import quote
@@ -33,6 +34,8 @@ from ansible_collections.cloudera.services.plugins.module_utils.atlas import (
     camel_preserving_options,
     snake_preserving_options,
 )
+
+_LABEL_PATTERN = re.compile(r"[A-Za-z0-9_-]+", re.ASCII)
 
 ENTITY_API = "/api/atlas/v2/entity"
 ADMIN_API = "/api/atlas/admin"
@@ -90,6 +93,15 @@ class AtlasEntity:
     update_time: Union[int, None, NULLABLE] = NULLABLE
     created_by: Union[str, None, NULLABLE] = NULLABLE
     updated_by: Union[str, None, NULLABLE] = NULLABLE
+
+
+def validate_labels(labels: List[str]) -> None:
+    """Raise ServicesError for a label Atlas would reject (ATLAS-400-00-090)."""
+    for label in labels:
+        if not _LABEL_PATTERN.fullmatch(label):
+            raise ServicesError(
+                f"Invalid label {label!r}: labels may only contain letters, digits, '_' and '-'",
+            )
 
 
 def _entity_to_payload(entity: AtlasEntity) -> Dict[str, Any]:
@@ -202,6 +214,18 @@ class AtlasEntityClient:
         soft: the entity remains with status DELETED until it is purged.
         """
         self.api_client.delete(f"{ENTITY_API}/guid/{quote(guid, safe='')}")
+
+    def set_entity_labels(self, guid: str, labels: List[str]) -> None:
+        """
+        Replace all labels of an entity with the given list.
+
+        An empty list removes every label. Atlas ignores a request body on DELETE
+        when reached through Knox, so this POST is the only way to remove labels.
+        """
+        self.api_client.post(
+            f"{ENTITY_API}/guid/{quote(guid, safe='')}/labels",
+            data=labels,
+        )
 
     def purge_entities(self, guids: List[str]) -> None:
         """Permanently remove soft-deleted entities; needs Atlas administrator rights."""
