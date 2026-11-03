@@ -33,6 +33,7 @@ from ansible_collections.cloudera.services.plugins.module_utils.common import fr
 from ansible_collections.cloudera.services.plugins.module_utils.ssb import (
     SsbExecutionMode,
     SsbJob,
+    SsbJobClient,
     SsbJobConfig,
     SsbJobRequest,
     SsbJobStart,
@@ -573,3 +574,149 @@ def test_ssb_job_missing_sql_for_create(ssb_module_args):
     result = e.value
     assert "required" in result["msg"].lower()
     assert "sql" in result["msg"].lower()
+
+
+def test_ssb_job_create_started_wait(request, ssb_module_args, set_keytab, purge_job):
+    """Test creating and starting a job, waiting for it to be running."""
+    job_name = request.node.name
+
+    ssb_module_args(
+        {
+            "state": "started",
+            "name": job_name,
+            "sql": "SELECT 1",
+            "wait": True,
+            "wait_timeout": 300,
+            "poll_interval": 5,
+        },
+    )
+
+    with pytest.raises(AnsibleExitJson) as e:
+        ssb_job.main()
+
+    result = e.value
+    purge_job(from_dict(SsbJob, result["job"]))
+
+    assert result["changed"] is True
+    assert result["job"]["name"] == job_name
+    assert result["job"]["state"] in SsbJobClient.WAIT_STARTED_STATES
+
+
+def test_ssb_job_start_existing_job_wait(ssb_module_args, set_keytab, existing_job):
+    """Test starting an existing job, waiting for it to be running."""
+    ssb_module_args(
+        {
+            "state": "started",
+            "name": existing_job.name,
+            "sql": existing_job.sql,
+            "wait": True,
+            "wait_timeout": 300,
+        },
+    )
+
+    with pytest.raises(AnsibleExitJson) as e:
+        ssb_job.main()
+
+    result = e.value
+    assert result["changed"] is True
+    assert result["job"]["state"] in SsbJobClient.WAIT_STARTED_STATES
+
+
+def test_ssb_job_start_wait_idempotent(ssb_module_args, set_keytab, running_job):
+    """Test that waiting on an already running job makes no change."""
+    ssb_module_args(
+        {
+            "state": "started",
+            "name": running_job.name,
+            "sql": running_job.sql,
+            "wait": True,
+        },
+    )
+
+    with pytest.raises(AnsibleExitJson) as e:
+        ssb_job.main()
+
+    result = e.value
+    assert result["changed"] is False
+
+
+def test_ssb_job_stop_running_job_wait(ssb_module_args, set_keytab, running_job):
+    """Test stopping a running job, waiting for it to stop."""
+    ssb_module_args(
+        {
+            "state": "stopped",
+            "name": running_job.name,
+            "wait": True,
+            "wait_timeout": 300,
+        },
+    )
+
+    with pytest.raises(AnsibleExitJson) as e:
+        ssb_job.main()
+
+    result = e.value
+    assert result["changed"] is True
+    assert result["job"]["state"] in SsbJobClient.WAIT_STOPPED_STATES
+
+
+def test_ssb_job_restart_wait(ssb_module_args, set_keytab, running_job):
+    """Test restarting a running job, waiting for the stop and the start."""
+    ssb_module_args(
+        {
+            "state": "restarted",
+            "name": running_job.name,
+            "sql": running_job.sql,
+            "wait": True,
+            "wait_timeout": 300,
+        },
+    )
+
+    with pytest.raises(AnsibleExitJson) as e:
+        ssb_job.main()
+
+    result = e.value
+    assert result["changed"] is True
+    assert result["job"]["state"] in SsbJobClient.WAIT_STARTED_STATES
+
+
+def test_ssb_job_delete_running_job_wait(
+    ssb_module_args,
+    set_keytab,
+    running_job,
+    job_client,
+    existing_project,
+):
+    """Test deleting a running job, waiting for the stop before the delete."""
+    ssb_module_args(
+        {
+            "state": "absent",
+            "name": running_job.name,
+            "wait": True,
+            "wait_timeout": 300,
+        },
+    )
+
+    with pytest.raises(AnsibleExitJson) as e:
+        ssb_job.main()
+
+    result = e.value
+    assert result["changed"] is True
+    assert job_client.describe_job(existing_project.id, running_job.job_id) is None
+
+
+def test_ssb_job_wait_check_mode(ssb_module_args, set_keytab, running_job):
+    """Test that wait does not stop or poll the job in check mode."""
+    ssb_module_args(
+        {
+            "state": "stopped",
+            "name": running_job.name,
+            "wait": True,
+            "_ansible_check_mode": True,
+        },
+    )
+
+    with pytest.raises(AnsibleExitJson) as e:
+        ssb_job.main()
+
+    result = e.value
+    assert result["changed"] is True

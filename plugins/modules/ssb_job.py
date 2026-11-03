@@ -71,6 +71,26 @@ options:
       - Only used when O(state=stopped) or O(state=absent).
     type: int
     required: false
+  wait:
+    description:
+      - Whether to poll the job until it reaches the state implied by O(state).
+      - For O(state=started) and O(state=restarted), wait for the job to be C(RUNNING) (or C(FINISHED)); the task fails if the job becomes C(FAILED) or C(CANCELED).
+      - For O(state=stopped), wait for the job to stop (C(CANCELED), C(FINISHED), C(FAILED), or C(STOPPED)).
+      - For O(state=restarted) and O(state=absent), also wait for the stop to complete before starting or deleting the job.
+      - Has no effect for O(state=present) or when running in check mode.
+    type: bool
+    default: false
+  wait_timeout:
+    description:
+      - Maximum time in seconds to wait for the job state when O(wait=true).
+      - The task fails if the state is not reached in time.
+    type: int
+    default: 600
+  poll_interval:
+    description:
+      - Time in seconds between job state checks when O(wait=true).
+    type: int
+    default: 5
   state:
     description:
       - The desired state of the job.
@@ -113,6 +133,16 @@ EXAMPLES = r"""
     name: "my_streaming_job"
     sql: "SELECT * FROM orders WHERE amount > 100"
     state: started
+
+- name: Create and start an SSB job, waiting for it to be running
+  cloudera.services.ssb_job:
+    project_id: "12345"
+    name: "my_streaming_job"
+    sql: "SELECT * FROM orders WHERE amount > 100"
+    state: started
+    wait: true
+    wait_timeout: 300
+    poll_interval: 10
 
 - name: Stop a running job
   cloudera.services.ssb_job:
@@ -275,6 +305,9 @@ class SsbJobModule(ServicesModule):
                 savepoint=dict(type="bool", default=False),
                 savepoint_path=dict(type="str", required=False),
                 stop_timeout=dict(type="int", required=False),
+                wait=dict(type="bool", default=False),
+                wait_timeout=dict(type="int", default=600),
+                poll_interval=dict(type="int", default=5),
                 state=dict(
                     type="str",
                     choices=["present", "started", "stopped", "restarted", "absent"],
@@ -294,6 +327,9 @@ class SsbJobModule(ServicesModule):
         self.savepoint = self.get_param("savepoint")
         self.savepoint_path = self.get_param("savepoint_path")
         self.stop_timeout = self.get_param("stop_timeout")
+        self.wait = self.get_param("wait")
+        self.wait_timeout = self.get_param("wait_timeout")
+        self.poll_interval = self.get_param("poll_interval")
         self.state = self.get_param("state")
 
         # Initialize result variables
@@ -373,6 +409,34 @@ class SsbJobModule(ServicesModule):
 
         return existing
 
+    def _wait_for_state(
+        self,
+        client: SsbJobClient,
+        job_id: int,
+        target_states,
+        fail_states=None,
+    ) -> None:
+        """Poll the job until it reaches a target state, if wait is requested."""
+        if not self.wait or self.module.check_mode:
+            return
+
+        kwargs = dict(timeout=self.wait_timeout, poll_interval=self.poll_interval)
+        if fail_states:
+            kwargs["fail_states"] = fail_states
+
+        client.wait_for_job_state(self.project_id, job_id, target_states, **kwargs)
+
+    def _wait_for_start(self, client: SsbJobClient, job_id: int) -> None:
+        self._wait_for_state(
+            client,
+            job_id,
+            SsbJobClient.WAIT_STARTED_STATES,
+            SsbJobClient.WAIT_START_FAIL_STATES,
+        )
+
+    def _wait_for_stop(self, client: SsbJobClient, job_id: int) -> None:
+        self._wait_for_state(client, job_id, SsbJobClient.WAIT_STOPPED_STATES)
+
     def process(self) -> None:
         client = SsbJobClient(self.api_client)
 
@@ -402,6 +466,10 @@ class SsbJobModule(ServicesModule):
                             existing.job_id,  # pyright: ignore[reportArgumentType]
                             stop_config,
                         )
+                        self._wait_for_stop(
+                            client,
+                            existing.job_id,
+                        )  # pyright: ignore[reportArgumentType]
 
                 # Delete the job
                 self.changed = True
@@ -468,6 +536,10 @@ class SsbJobModule(ServicesModule):
                         job_ref.job_id,  # pyright: ignore[reportArgumentType]
                         start_config,
                     )
+                    self._wait_for_start(
+                        client,
+                        job_ref.job_id,
+                    )  # pyright: ignore[reportArgumentType]
                     # Refresh job state
                     self.job = client.describe_job(
                         self.project_id,
@@ -518,6 +590,10 @@ class SsbJobModule(ServicesModule):
                         job_ref.job_id,  # pyright: ignore[reportArgumentType]
                         stop_config,
                     )
+                    self._wait_for_stop(
+                        client,
+                        job_ref.job_id,
+                    )  # pyright: ignore[reportArgumentType]
                     # Refresh job state
                     self.job = client.describe_job(
                         self.project_id,
@@ -547,6 +623,10 @@ class SsbJobModule(ServicesModule):
                             existing.job_id,  # pyright: ignore[reportArgumentType]
                             stop_config,
                         )
+                        self._wait_for_stop(
+                            client,
+                            existing.job_id,
+                        )  # pyright: ignore[reportArgumentType]
 
                 # Check for parameter changes and update if needed
                 existing = self._update_job(client, existing)
@@ -597,6 +677,10 @@ class SsbJobModule(ServicesModule):
                     job_ref.job_id,  # pyright: ignore[reportOptionalMemberAccess, reportArgumentType]
                     start_config,
                 )
+                self._wait_for_start(
+                    client,
+                    job_ref.job_id,
+                )  # pyright: ignore[reportOptionalMemberAccess, reportArgumentType]
                 # Refresh job state
                 self.job = client.describe_job(
                     self.project_id,
