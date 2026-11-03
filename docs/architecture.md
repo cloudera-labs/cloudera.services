@@ -78,6 +78,8 @@ Entity instances (the objects typedefs describe, such as a `hive_table`) use a s
 - **Verbatim maps:** `attributes`, `relationship_attributes`, `custom_attributes` and `business_attributes` hold Atlas attribute names (`qualifiedName`), which must never be snake-cased. Pass them as `verbatim_values` to `snake_preserving_options()` / `camel_preserving_options()` (`ENTITY_VERBATIM_VALUES`): the map's own key is converted, its contents are not. This differs from `verbatim_keys`, which also leaves the key itself alone
 - **Lookups:** a 404 is squelched to `None` on reads only. An unknown *type* is an HTTP 400, so a mistyped type name fails instead of reading as a missing entity. A lookup by unique attributes never returns a deleted entity, but a lookup by guid does, with `status: DELETED`
 - **Response shape:** validate it before `from_dict`; a malformed body must raise `ServicesError`, not a `TypeError` for a missing required field
+- **Labels:** `set_entity_labels()` POSTs the whole list, because a DELETE request body does not reach Atlas through Knox. `atlas_entity_label` therefore reads the current labels, works out the target list (add, `exclusive`, or remove) and writes only when the sets differ. Atlas omits `labels` for an unlabelled entity, so treat a non-list value as empty. Check labels with `validate_labels()` before any request; Atlas allows only letters, digits, `_` and `-`
+- **Aspect modules and missing entities:** a module that changes an aspect of an existing entity fails under `present` when the entity is missing or not `ACTIVE`, and does nothing under `absent`
 
 ## State Management
 
