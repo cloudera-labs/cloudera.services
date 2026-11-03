@@ -23,6 +23,7 @@ import pytest
 from ansible_collections.cloudera.services.plugins.module_utils.common import (
     from_dict,
     ServicesClient,
+    ServicesError,
 )
 from ansible_collections.cloudera.services.plugins.module_utils.ssb import (
     SsbJobClient,
@@ -248,7 +249,7 @@ def test_delete_job(mocker):
 
     response = client.delete_job(PROJECT_ID, 123)
 
-    assert response == None
+    assert response is None
 
     # Verify that the delete method was called with correct parameters
     api_client.delete.assert_called_once_with(
@@ -441,3 +442,118 @@ def test_get_job_state_without_sample_id(mocker):
     api_client.get.assert_called_once_with(
         f"/api/v2/projects/{PROJECT_ID}/jobs/456/state",
     )
+
+
+WAIT_SLEEP = "ansible_collections.cloudera.services.plugins.module_utils.ssb.time.sleep"
+
+
+def test_wait_for_job_state_immediate(mocker):
+    """Return without sleeping when the job is already in a target state."""
+    sleep = mocker.patch(WAIT_SLEEP)
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.get.side_effect = [
+        dict(state=SsbJobState.RUNNING.value),
+    ]
+    client = SsbJobClient(api_client=api_client)
+
+    response = client.wait_for_job_state(
+        PROJECT_ID,
+        123,
+        SsbJobClient.WAIT_STARTED_STATES,
+    )
+
+    assert response.state == SsbJobState.RUNNING.value
+    assert api_client.get.call_count == 1
+    sleep.assert_not_called()
+
+
+def test_wait_for_job_state_polls_until_target(mocker):
+    """Poll through transitional states, sleeping poll_interval between checks."""
+    sleep = mocker.patch(WAIT_SLEEP)
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.get.side_effect = [
+        dict(state=SsbJobState.INITIALIZING.value),
+        dict(state=SsbJobState.CREATED.value),
+        dict(state=SsbJobState.RUNNING.value),
+    ]
+    client = SsbJobClient(api_client=api_client)
+
+    response = client.wait_for_job_state(
+        PROJECT_ID,
+        123,
+        SsbJobClient.WAIT_STARTED_STATES,
+        poll_interval=3,
+    )
+
+    assert response.state == SsbJobState.RUNNING.value
+    assert api_client.get.call_count == 3
+    assert sleep.call_count == 2
+    sleep.assert_called_with(3)
+
+
+def test_wait_for_job_state_failure_state(mocker):
+    """Fail fast when the job enters a failure state."""
+    sleep = mocker.patch(WAIT_SLEEP)
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.get.side_effect = [
+        dict(state=SsbJobState.INITIALIZING.value),
+        dict(state=SsbJobState.FAILED.value),
+    ]
+    client = SsbJobClient(api_client=api_client)
+
+    with pytest.raises(ServicesError, match="FAILED"):
+        client.wait_for_job_state(
+            PROJECT_ID,
+            123,
+            SsbJobClient.WAIT_STARTED_STATES,
+            fail_states=SsbJobClient.WAIT_START_FAIL_STATES,
+        )
+
+    assert api_client.get.call_count == 2
+    assert sleep.call_count == 1
+
+
+def test_wait_for_job_state_timeout(mocker):
+    """Raise ServicesError when the target state is not reached in time."""
+    mocker.patch(WAIT_SLEEP)
+    clock = iter([0, 0, 5, 10, 15])
+    mocker.patch(
+        "ansible_collections.cloudera.services.plugins.module_utils.ssb.time.monotonic",
+        side_effect=lambda: next(clock),
+    )
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.get.side_effect = [
+        dict(state=SsbJobState.INITIALIZING.value),
+        dict(state=SsbJobState.INITIALIZING.value),
+        dict(state=SsbJobState.INITIALIZING.value),
+        dict(state=SsbJobState.INITIALIZING.value),
+    ]
+    client = SsbJobClient(api_client=api_client)
+
+    with pytest.raises(ServicesError, match="Timed out"):
+        client.wait_for_job_state(
+            PROJECT_ID,
+            123,
+            SsbJobClient.WAIT_STARTED_STATES,
+            timeout=10,
+            poll_interval=5,
+        )
+
+
+def test_wait_for_job_state_stopped_targets(mocker):
+    """Stopped targets accept CANCELED."""
+    mocker.patch(WAIT_SLEEP)
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.get.side_effect = [
+        dict(state=SsbJobState.CANCELLING.value),
+        dict(state=SsbJobState.CANCELED.value),
+    ]
+    client = SsbJobClient(api_client=api_client)
+
+    response = client.wait_for_job_state(
+        PROJECT_ID,
+        123,
+        SsbJobClient.WAIT_STOPPED_STATES,
+    )
+
+    assert response.state == SsbJobState.CANCELED.value

@@ -24,6 +24,9 @@ import re
 from typing import Generator
 from unittest.mock import Mock
 
+from ansible_collections.cloudera.services.plugins.module_utils.common import (
+    ServicesError,
+)
 from ansible_collections.cloudera.services.plugins.module_utils.ssb import (
     SsbExecutionMode,
     SsbJobClient,
@@ -692,4 +695,140 @@ def test_get_job_state_nonexistent_job(
     call_args = ssb_rest_client.module.fail_json.call_args
     assert call_args is not None
     assert "msg" in call_args.kwargs
+    assert re.match(r"\[404\] Job 9999 not found", call_args.kwargs["msg"])
+
+
+@pytest.mark.usefixtures("set_keytab")
+def test_wait_for_job_state_started(
+    job_client,
+    ansible_module,
+    ssb_rest_client,
+    existing_streaming_job,
+):
+    """Test waiting for a started Job to be running."""
+    ssb_rest_client.module = ansible_module
+
+    job_client.start_job(
+        project_id=existing_streaming_job.project_id,
+        job_id=existing_streaming_job.job_id,
+        config=SsbJobStart(
+            sql=existing_streaming_job.sql,
+            job_config=SsbJobConfig(
+                job_name=existing_streaming_job.name,
+                runtime_config=SsbRuntimeConfig(
+                    execution_mode=SsbExecutionMode.PER_JOB.value,
+                    runtime_mode=SsbRuntimeMode.STREAMING.value,
+                ),
+            ),
+        ),
+    )
+
+    response = job_client.wait_for_job_state(
+        project_id=existing_streaming_job.project_id,
+        job_id=existing_streaming_job.job_id,
+        target_states=SsbJobClient.WAIT_STARTED_STATES,
+        timeout=300,
+        poll_interval=5,
+        fail_states=SsbJobClient.WAIT_START_FAIL_STATES,
+    )
+
+    assert isinstance(response, SsbJobStateResponse)
+    assert response.state in SsbJobClient.WAIT_STARTED_STATES
+
+
+@pytest.mark.usefixtures("set_keytab")
+def test_wait_for_job_state_stopped(
+    job_client,
+    ansible_module,
+    ssb_rest_client,
+    running_streaming_job,
+):
+    """Test waiting for a stopped Job to reach a stopped state."""
+    ssb_rest_client.module = ansible_module
+
+    job_client.stop_job(
+        project_id=running_streaming_job.project_id,
+        job_id=running_streaming_job.job_id,
+        config=SsbJobStop(),
+    )
+
+    response = job_client.wait_for_job_state(
+        project_id=running_streaming_job.project_id,
+        job_id=running_streaming_job.job_id,
+        target_states=SsbJobClient.WAIT_STOPPED_STATES,
+        timeout=300,
+        poll_interval=5,
+    )
+
+    assert isinstance(response, SsbJobStateResponse)
+    assert response.state in SsbJobClient.WAIT_STOPPED_STATES
+
+
+def test_wait_for_job_state_timeout(
+    job_client,
+    ansible_module,
+    ssb_rest_client,
+    existing_streaming_job,
+):
+    """Test waiting on a Job that is never started raises a timeout error."""
+    ssb_rest_client.module = ansible_module
+
+    with pytest.raises(ServicesError, match="Timed out"):
+        job_client.wait_for_job_state(
+            project_id=existing_streaming_job.project_id,
+            job_id=existing_streaming_job.job_id,
+            target_states={SsbJobState.RUNNING.value},
+            timeout=3,
+            poll_interval=1,
+        )
+
+
+def test_wait_for_job_state_fail_state(
+    job_client,
+    ansible_module,
+    ssb_rest_client,
+    existing_streaming_job,
+):
+    """Test waiting aborts when the Job is already in a failure state."""
+    ssb_rest_client.module = ansible_module
+
+    current = job_client.get_job_state(
+        project_id=existing_streaming_job.project_id,
+        job_id=existing_streaming_job.job_id,
+    )
+
+    with pytest.raises(ServicesError, match=current.state):
+        job_client.wait_for_job_state(
+            project_id=existing_streaming_job.project_id,
+            job_id=existing_streaming_job.job_id,
+            target_states={SsbJobState.RUNNING.value},
+            timeout=30,
+            poll_interval=1,
+            fail_states={current.state},
+        )
+
+
+def test_wait_for_job_state_nonexistent_job(
+    job_client,
+    ansible_module,
+    ssb_rest_client,
+    existing_project,
+):
+    """Test waiting on a nonexistent Job raises an exception."""
+    ssb_rest_client.module = ansible_module
+    ssb_rest_client.module.fail_json = Mock(
+        side_effect=AnsibleFailJson({"msg": "Job not found"}),
+    )
+
+    with pytest.raises(AnsibleFailJson):
+        job_client.wait_for_job_state(
+            project_id=existing_project.id,
+            job_id=9999,
+            target_states=SsbJobClient.WAIT_STARTED_STATES,
+            timeout=10,
+            poll_interval=1,
+        )
+
+    call_args = ssb_rest_client.module.fail_json.call_args
+    assert call_args is not None
     assert re.match(r"\[404\] Job 9999 not found", call_args.kwargs["msg"])
