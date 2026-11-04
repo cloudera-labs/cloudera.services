@@ -66,6 +66,7 @@ action_groups:
   atlas:
     - atlas_business_metadata_def
     - atlas_classification_def
+    - atlas_entity_business_metadata
     - atlas_entity_def
     - atlas_entity_info
     - atlas_entity_label
