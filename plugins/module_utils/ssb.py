@@ -20,19 +20,19 @@ REST clients for the Cloudera SQL Stream Builder (SSB) API.
 
 import json
 import re
+import time
 
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
-
-from ansible.module_utils.common.dict_transformations import snake_dict_to_camel_dict
+from typing import Any, Dict, Iterable, List, Optional, Union
 
 from ansible_collections.cloudera.services.plugins.module_utils.common import (
     from_dict,
     to_dict,
     NULLABLE,
     ServicesClient,
+    ServicesError,
 )
 
 
@@ -1238,7 +1238,7 @@ class SsbJobStateResponse:
         if self.state not in self.ALL_STATES:
             valid_states = ", ".join(sorted(self.ALL_STATES))
             raise ValueError(
-                f"Invalid job state: {self.state}. " f"Must be one of: {valid_states}",
+                f"Invalid job state: {self.state}. Must be one of: {valid_states}",
             )
 
 
@@ -1273,6 +1273,27 @@ class SsbJobClient:
             SsbJobState.CANCELLING.value,
             SsbJobState.RESTARTING.value,
             SsbJobState.RECONCILING.value,
+        ],
+    )
+
+    WAIT_STARTED_STATES = frozenset(
+        [
+            SsbJobState.RUNNING.value,
+            SsbJobState.FINISHED.value,
+        ],
+    )
+    WAIT_START_FAIL_STATES = frozenset(
+        [
+            SsbJobState.FAILED.value,
+            SsbJobState.CANCELED.value,
+        ],
+    )
+    WAIT_STOPPED_STATES = frozenset(
+        [
+            SsbJobState.CANCELED.value,
+            SsbJobState.FINISHED.value,
+            SsbJobState.FAILED.value,
+            SsbJobState.STOPPED.value,
         ],
     )
 
@@ -1446,6 +1467,56 @@ class SsbJobClient:
                 f"/api/v2/projects/{project_id}/jobs/{job_id}/state",
             ),
         )
+
+    def wait_for_job_state(
+        self,
+        project_id: str,
+        job_id: int,
+        target_states: Iterable[str],
+        timeout: int = 600,
+        poll_interval: int = 5,
+        fail_states: Iterable[str] = (),
+    ) -> SsbJobStateResponse:
+        """
+        Poll a job until it reaches one of the target states.
+
+        Args:
+            project_id (str): The unique identifier of the project containing the job.
+            job_id (int): The unique identifier of the job.
+            target_states (Iterable[str]): States that end the wait successfully.
+            timeout (int): Maximum seconds to wait. Defaults to 600.
+            poll_interval (int): Seconds to sleep between checks. Defaults to 5.
+            fail_states (Iterable[str]): States that abort the wait with an error.
+
+        Returns:
+            SsbJobStateResponse: The state that satisfied the wait.
+
+        Raises:
+            ServicesError: If the job enters a failure state or the timeout elapses.
+        """
+        target_states = frozenset(target_states)
+        fail_states = frozenset(fail_states)
+        deadline = time.monotonic() + timeout
+
+        while True:
+            response = self.get_job_state(project_id, job_id)
+
+            if response.state in target_states:
+                return response
+
+            if response.state in fail_states:
+                raise ServicesError(
+                    f"Job {job_id} entered state {response.state} while waiting for "
+                    f"{', '.join(sorted(target_states))}",
+                )
+
+            if time.monotonic() + poll_interval > deadline:
+                raise ServicesError(
+                    f"Timed out after {timeout} seconds waiting for job {job_id} to reach "
+                    f"{', '.join(sorted(target_states))}; last state was {response.state}",
+                )
+
+            time.sleep(poll_interval)
 
 
 @dataclass

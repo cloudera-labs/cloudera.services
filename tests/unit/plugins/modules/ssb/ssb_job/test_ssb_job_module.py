@@ -26,13 +26,19 @@ from ansible_collections.cloudera.services.tests.unit import (
 )
 
 from ansible_collections.cloudera.services.plugins.modules import ssb_job
+from ansible_collections.cloudera.services.plugins.module_utils.common import (
+    ServicesError,
+)
 from ansible_collections.cloudera.services.plugins.module_utils.ssb import (
+    SsbExecutionMode,
     SsbJob,
+    SsbJobClient,
     SsbJobConfig,
-    SsbJobRequest,
     SsbJobStart,
     SsbJobStop,
     SsbJobResponse,
+    SsbRuntimeConfig,
+    SsbRuntimeMode,
 )
 
 BASE_URL = "https://api.cloudera.internal"
@@ -914,6 +920,9 @@ def test_ssb_job_check_mode_create(module_args, mocker):
 
     result = e.value
     assert result["changed"] is True
+    # Should call list_jobs in check mode
+    mock_list_jobs.assert_called_once_with(PROJECT_ID)
+
     # Should not call create_job in check mode
     mock_create_job.assert_not_called()
 
@@ -950,6 +959,10 @@ def test_ssb_job_check_mode_delete(module_args, mocker):
 
     result = e.value
     assert result["changed"] is True
+
+    # Should call list_jobs in check mode
+    mock_list_jobs.assert_called_once_with(PROJECT_ID)
+
     # Should not call delete_job in check mode
     mock_delete_job.assert_not_called()
 
@@ -1040,6 +1053,10 @@ def test_ssb_job_diff_mode_update(module_args, mocker):
     assert result["diff"]["before"]["sql"] == "SELECT * FROM orders"
     assert result["diff"]["after"]["sql"] == "SELECT * FROM customers"
 
+    mock_list_jobs.assert_called_once_with(PROJECT_ID)
+
+    mock_update_job.assert_called_once_with(PROJECT_ID, updated_job)
+
 
 def test_ssb_job_diff_mode_state_change(module_args, mocker):
     """Test diff mode when changing job state."""
@@ -1048,6 +1065,17 @@ def test_ssb_job_diff_mode_state_change(module_args, mocker):
         name="existing_job",
         sql="SELECT * FROM orders",
         state="CREATED",
+    )
+
+    existing_job_start = SsbJobStart(
+        sql=existing_job.sql,
+        job_config=SsbJobConfig(
+            job_name=existing_job.name,
+            runtime_config=SsbRuntimeConfig(
+                execution_mode=SsbExecutionMode.PER_JOB.value,
+                runtime_mode=SsbRuntimeMode.STREAMING.value,
+            ),
+        ),
     )
 
     mock_list_jobs = mocker.patch(
@@ -1087,6 +1115,14 @@ def test_ssb_job_diff_mode_state_change(module_args, mocker):
     assert "diff" in result
     assert result["diff"]["before"]["state"] == "CREATED"
     assert result["diff"]["after"]["state"] == "RUNNING"
+
+    mock_list_jobs.assert_called_once_with(PROJECT_ID)
+    mock_start_job.assert_called_once_with(
+        PROJECT_ID,
+        existing_job.job_id,
+        existing_job_start,
+    )
+    mock_describe_job.assert_called_once_with(PROJECT_ID, existing_job.job_id)
 
 
 def test_ssb_job_missing_name_and_id(module_args):
@@ -1147,3 +1183,252 @@ def test_ssb_job_missing_sql_for_create(module_args, mocker):
     result = e.value
     assert "required" in result["msg"].lower()
     assert "sql" in result["msg"].lower()
+
+    mock_list_jobs.assert_called_once_with(PROJECT_ID)
+
+
+MODULE_CLIENT = (
+    "ansible_collections.cloudera.services.plugins.modules.ssb_job.SsbJobClient"
+)
+
+
+def _job(state, job_id=1, name="wait_job"):
+    return SsbJob(job_id=job_id, name=name, sql="SELECT * FROM orders", state=state)
+
+
+def test_ssb_job_started_wait(module_args, mocker):
+    """Test that wait=true polls for the job to be running after start."""
+    mocker.patch(f"{MODULE_CLIENT}.list_jobs", return_value=[_job("CREATED")])
+    mocker.patch(f"{MODULE_CLIENT}.start_job", return_value=[])
+    mocker.patch(f"{MODULE_CLIENT}.describe_job", return_value=_job("RUNNING"))
+    mock_wait = mocker.patch(f"{MODULE_CLIENT}.wait_for_job_state")
+
+    module_args(
+        {
+            "endpoint": BASE_URL,
+            "project_id": PROJECT_ID,
+            "name": "wait_job",
+            "state": "started",
+            "wait": True,
+            "wait_timeout": 120,
+            "poll_interval": 2,
+        },
+    )
+
+    with pytest.raises(AnsibleExitJson) as e:
+        ssb_job.main()
+
+    assert e.value["changed"] is True
+    assert e.value["job"]["state"] == "RUNNING"
+    mock_wait.assert_called_once_with(
+        PROJECT_ID,
+        1,
+        SsbJobClient.WAIT_STARTED_STATES,
+        timeout=120,
+        poll_interval=2,
+        fail_states=SsbJobClient.WAIT_START_FAIL_STATES,
+    )
+
+
+def test_ssb_job_started_no_wait_by_default(module_args, mocker):
+    """Test that the job state is not polled unless wait=true."""
+    mocker.patch(f"{MODULE_CLIENT}.list_jobs", return_value=[_job("CREATED")])
+    mocker.patch(f"{MODULE_CLIENT}.start_job", return_value=[])
+    mocker.patch(f"{MODULE_CLIENT}.describe_job", return_value=_job("INITIALIZING"))
+    mock_wait = mocker.patch(f"{MODULE_CLIENT}.wait_for_job_state")
+
+    module_args(
+        {
+            "endpoint": BASE_URL,
+            "project_id": PROJECT_ID,
+            "name": "wait_job",
+            "state": "started",
+        },
+    )
+
+    with pytest.raises(AnsibleExitJson):
+        ssb_job.main()
+
+    mock_wait.assert_not_called()
+
+
+def test_ssb_job_started_wait_failure(module_args, mocker):
+    """Test that a job that fails to start fails the task."""
+    mocker.patch(f"{MODULE_CLIENT}.list_jobs", return_value=[_job("CREATED")])
+    mocker.patch(f"{MODULE_CLIENT}.start_job", return_value=[])
+    mocker.patch(f"{MODULE_CLIENT}.describe_job", return_value=_job("FAILED"))
+    mocker.patch(
+        f"{MODULE_CLIENT}.wait_for_job_state",
+        side_effect=ServicesError("Job 1 entered state FAILED"),
+    )
+
+    module_args(
+        {
+            "endpoint": BASE_URL,
+            "project_id": PROJECT_ID,
+            "name": "wait_job",
+            "state": "started",
+            "wait": True,
+        },
+    )
+
+    with pytest.raises(AnsibleFailJson) as e:
+        ssb_job.main()
+
+    assert "FAILED" in e.value["msg"]
+
+
+def test_ssb_job_started_wait_idempotent(module_args, mocker):
+    """Test that an already running job is not polled."""
+    mocker.patch(f"{MODULE_CLIENT}.list_jobs", return_value=[_job("RUNNING")])
+    mock_wait = mocker.patch(f"{MODULE_CLIENT}.wait_for_job_state")
+
+    module_args(
+        {
+            "endpoint": BASE_URL,
+            "project_id": PROJECT_ID,
+            "name": "wait_job",
+            "state": "started",
+            "wait": True,
+        },
+    )
+
+    with pytest.raises(AnsibleExitJson) as e:
+        ssb_job.main()
+
+    assert e.value["changed"] is False
+    mock_wait.assert_not_called()
+
+
+def test_ssb_job_stopped_wait(module_args, mocker):
+    """Test that wait=true polls for the job to stop."""
+    mocker.patch(f"{MODULE_CLIENT}.list_jobs", return_value=[_job("RUNNING")])
+    mocker.patch(f"{MODULE_CLIENT}.stop_job", return_value=None)
+    mocker.patch(f"{MODULE_CLIENT}.describe_job", return_value=_job("CANCELED"))
+    mock_wait = mocker.patch(f"{MODULE_CLIENT}.wait_for_job_state")
+
+    module_args(
+        {
+            "endpoint": BASE_URL,
+            "project_id": PROJECT_ID,
+            "name": "wait_job",
+            "state": "stopped",
+            "wait": True,
+        },
+    )
+
+    with pytest.raises(AnsibleExitJson) as e:
+        ssb_job.main()
+
+    assert e.value["changed"] is True
+    mock_wait.assert_called_once_with(
+        PROJECT_ID,
+        1,
+        SsbJobClient.WAIT_STOPPED_STATES,
+        timeout=600,
+        poll_interval=5,
+    )
+
+
+def test_ssb_job_stopped_wait_timeout(module_args, mocker):
+    """Test that a job that never stops fails the task."""
+    mocker.patch(f"{MODULE_CLIENT}.list_jobs", return_value=[_job("RUNNING")])
+    mocker.patch(f"{MODULE_CLIENT}.stop_job", return_value=None)
+    mocker.patch(
+        f"{MODULE_CLIENT}.wait_for_job_state",
+        side_effect=ServicesError("Timed out after 600 seconds"),
+    )
+
+    module_args(
+        {
+            "endpoint": BASE_URL,
+            "project_id": PROJECT_ID,
+            "name": "wait_job",
+            "state": "stopped",
+            "wait": True,
+        },
+    )
+
+    with pytest.raises(AnsibleFailJson) as e:
+        ssb_job.main()
+
+    assert "Timed out" in e.value["msg"]
+
+
+def test_ssb_job_restarted_wait(module_args, mocker):
+    """Test that restart waits for the stop, then for the start."""
+    mocker.patch(f"{MODULE_CLIENT}.list_jobs", return_value=[_job("RUNNING")])
+    mocker.patch(f"{MODULE_CLIENT}.stop_job", return_value=None)
+    mocker.patch(f"{MODULE_CLIENT}.start_job", return_value=[])
+    mocker.patch(f"{MODULE_CLIENT}.describe_job", return_value=_job("RUNNING"))
+    mock_wait = mocker.patch(f"{MODULE_CLIENT}.wait_for_job_state")
+
+    module_args(
+        {
+            "endpoint": BASE_URL,
+            "project_id": PROJECT_ID,
+            "name": "wait_job",
+            "state": "restarted",
+            "wait": True,
+        },
+    )
+
+    with pytest.raises(AnsibleExitJson):
+        ssb_job.main()
+
+    assert [c.args[2] for c in mock_wait.call_args_list] == [
+        SsbJobClient.WAIT_STOPPED_STATES,
+        SsbJobClient.WAIT_STARTED_STATES,
+    ]
+
+
+def test_ssb_job_absent_wait(module_args, mocker):
+    """Test that delete waits for the stop to finish before deleting."""
+    mocker.patch(f"{MODULE_CLIENT}.list_jobs", return_value=[_job("RUNNING")])
+    mocker.patch(f"{MODULE_CLIENT}.stop_job", return_value=None)
+    mock_delete = mocker.patch(f"{MODULE_CLIENT}.delete_job")
+    calls = []
+    mock_wait = mocker.patch(
+        f"{MODULE_CLIENT}.wait_for_job_state",
+        side_effect=lambda *a, **k: calls.append("wait"),
+    )
+    mock_delete.side_effect = lambda *a, **k: calls.append("delete")
+
+    module_args(
+        {
+            "endpoint": BASE_URL,
+            "project_id": PROJECT_ID,
+            "name": "wait_job",
+            "state": "absent",
+            "wait": True,
+        },
+    )
+
+    with pytest.raises(AnsibleExitJson):
+        ssb_job.main()
+
+    mock_wait.assert_called_once()
+    assert calls == ["wait", "delete"]
+
+
+def test_ssb_job_wait_check_mode(module_args, mocker):
+    """Test that check mode never polls."""
+    mocker.patch(f"{MODULE_CLIENT}.list_jobs", return_value=[_job("RUNNING")])
+    mock_wait = mocker.patch(f"{MODULE_CLIENT}.wait_for_job_state")
+
+    module_args(
+        {
+            "endpoint": BASE_URL,
+            "project_id": PROJECT_ID,
+            "name": "wait_job",
+            "state": "stopped",
+            "wait": True,
+            "_ansible_check_mode": True,
+        },
+    )
+
+    with pytest.raises(AnsibleExitJson) as e:
+        ssb_job.main()
+
+    assert e.value["changed"] is True
+    mock_wait.assert_not_called()
