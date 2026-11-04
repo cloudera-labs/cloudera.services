@@ -85,7 +85,7 @@ attributes:
     support: full
 notes:
   - Atlas replaces the whole label list on every change, so the module reads the current labels first and only writes when they differ.
-  - With O(state=present) the entity must exist and be active; an entity registered asynchronously by a hook may need O(ansible.builtin.until) retries.
+  - With O(state=present) the entity must exist and be active; an entity registered asynchronously by a hook may need L(until,https://docs.ansible.com/projects/ansible/latest/playbook_guide/playbooks_loops.html) retries.
 seealso:
   - module: cloudera.services.atlas_entity_info
 """
@@ -145,7 +145,7 @@ RETURN = r"""
 labels:
   description:
     - The labels on the entity after the module ran.
-    - With O(check_mode=true) these are the labels the entity would have.
+    - With O(ignore:check_mode=true) these are the labels the entity would have.
     - Empty when the entity does not exist and O(state=absent).
   type: list
   elements: str
