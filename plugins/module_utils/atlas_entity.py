@@ -36,6 +36,11 @@ from ansible_collections.cloudera.services.plugins.module_utils.atlas import (
 )
 
 _LABEL_PATTERN = re.compile(r"[A-Za-z0-9_-]+", re.ASCII)
+_INTEGER_PATTERN = re.compile(r"[+-]?[0-9]+", re.ASCII)
+
+_INTEGER_TYPES = frozenset({"byte", "short", "int", "long", "date"})
+_FLOAT_TYPES = frozenset({"float", "double"})
+_ARRAY_PATTERN = re.compile(r"array<(.+)>")
 
 ENTITY_API = "/api/atlas/v2/entity"
 ADMIN_API = "/api/atlas/admin"
@@ -102,6 +107,95 @@ def validate_labels(labels: List[str]) -> None:
             raise ServicesError(
                 f"Invalid label {label!r}: labels may only contain letters, digits, '_' and '-'",
             )
+
+
+def _normalize_value(attribute: str, type_name: str, value: Any) -> Any:
+    """Convert one business attribute value to the type Atlas stores for type_name."""
+    array = _ARRAY_PATTERN.fullmatch(type_name)
+    if array:
+        if not isinstance(value, list):
+            raise ServicesError(
+                f"Business attribute '{attribute}' must be a list ({type_name}), not {value!r}",
+            )
+        return [_normalize_value(attribute, array.group(1), item) for item in value]
+
+    invalid = ServicesError(
+        f"Business attribute '{attribute}' must be of type {type_name}, not {value!r}",
+    )
+
+    if isinstance(value, (dict, list)):
+        raise invalid
+
+    if type_name in _INTEGER_TYPES:
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        if isinstance(value, str) and _INTEGER_PATTERN.fullmatch(value.strip()):
+            return int(value)
+        raise invalid
+
+    if type_name in _FLOAT_TYPES:
+        if isinstance(value, bool):
+            raise invalid
+        if isinstance(value, (int, float)):
+            return value
+        try:
+            return float(value)
+        except ValueError:
+            raise invalid
+
+    if type_name == "boolean":
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.lower() in ("true", "false"):
+            return value.lower() == "true"
+        raise invalid
+
+    if type_name == "string":
+        return value if isinstance(value, str) else str(value)
+
+    return value
+
+
+def normalize_business_attributes(
+    name: str,
+    attribute_defs: Any,
+    attributes: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Check business attributes against their typedef and convert the values to the
+    types Atlas stores.
+
+    Atlas silently ignores attributes the typedef does not define, and stores the
+    string "5" of an int attribute as 5, so both would otherwise show up as a
+    change on every run.
+
+    Raises ServicesError for an unknown attribute, a null, or a value that cannot
+    be the attribute's type.
+    """
+    types: Dict[str, str] = {
+        attribute_def.name: attribute_def.type_name
+        for attribute_def in (
+            attribute_defs if isinstance(attribute_defs, list) else []
+        )
+    }
+
+    unknown = sorted(set(attributes) - set(types))
+    if unknown:
+        raise ServicesError(
+            f"Business metadata '{name}' does not define attribute(s) "
+            f"{', '.join(unknown)}; it defines: {', '.join(sorted(types)) or 'none'}",
+        )
+
+    normalized: Dict[str, Any] = {}
+    for attribute, value in attributes.items():
+        if value is None:
+            raise ServicesError(
+                f"Business attribute '{attribute}' cannot be null; remove the whole "
+                f"business metadata with state 'absent' instead",
+            )
+        normalized[attribute] = _normalize_value(attribute, types[attribute], value)
+
+    return normalized
 
 
 def _entity_to_payload(entity: AtlasEntity) -> Dict[str, Any]:
@@ -225,6 +319,34 @@ class AtlasEntityClient:
         self.api_client.post(
             f"{ENTITY_API}/guid/{quote(guid, safe='')}/labels",
             data=labels,
+        )
+
+    def set_entity_business_metadata(
+        self,
+        guid: str,
+        name: str,
+        attributes: Dict[str, Any],
+    ) -> None:
+        """
+        Set attributes of one business metadata on an entity, merging with its others.
+
+        Never sends isOverwrite=true, which would also wipe every other business
+        metadata on the entity.
+        """
+        self.api_client.post(
+            f"{ENTITY_API}/guid/{quote(guid, safe='')}/businessmetadata/{quote(name, safe='')}",
+            params={"isOverwrite": "false"},
+            data=attributes,
+        )
+
+    def remove_entity_business_metadata(self, guid: str, name: str) -> None:
+        """
+        Remove one business metadata, with all its attributes, from an entity.
+
+        Atlas ignores a request body on DELETE, so single attributes cannot be removed.
+        """
+        self.api_client.delete(
+            f"{ENTITY_API}/guid/{quote(guid, safe='')}/businessmetadata/{quote(name, safe='')}",
         )
 
     def purge_entities(self, guids: List[str]) -> None:

@@ -1216,9 +1216,11 @@ def ml_model_runtime_identifier(ml_runtime_client) -> str:
         return None
 
     identifier = _pick(
-        lambda r: r.editor == "PBJ Workbench"
-        and r.edition == "Standard"
-        and "Python" in str(r.kernel or ""),
+        lambda r: (
+            r.editor == "PBJ Workbench"
+            and r.edition == "Standard"
+            and "Python" in str(r.kernel or "")
+        ),
     ) or _pick(
         lambda r: r.editor == "PBJ Workbench" and "Python" in str(r.kernel or ""),
     )
@@ -1672,9 +1674,7 @@ def ml_model_script(
         existing_ml_project.id,
         path,
         content=(
-            "# created by pytest\n"
-            "def predict(args):\n"
-            "    return {'result': args}\n"
+            "# created by pytest\ndef predict(args):\n    return {'result': args}\n"
         ),
     )
 
@@ -2596,6 +2596,48 @@ def atlas_deletable_entity(
     atlas_purge_entity(str(entity.guid))
 
     yield entity
+
+
+@pytest.fixture
+def atlas_entity_business_metadata_def(
+    request,
+    atlas_typedef_client,
+    atlas_purge_typedef,
+    atlas_entity_type,
+) -> AtlasBusinessMetadataDef:
+    """
+    Fixture to create a function-scoped business metadata typedef that applies only to the
+    test entity type, with a string, an int and a boolean attribute.
+
+    Request it before `atlas_deletable_entity`: fixtures tear down in reverse order, so
+    the entity is deleted and purged before Atlas is asked to delete the typedef.
+    """
+    return _create_deletable(
+        atlas_typedef_client,
+        atlas_purge_typedef,
+        atlas_typedef_client.create_business_metadata_def,
+        AtlasBusinessMetadataDef(
+            name=_atlas_type_name("entity_bm", request.node.name),
+            description="Entity business metadata created by pytest - safe to delete",
+            attribute_defs=[
+                AtlasAttributeDef(
+                    name=name,
+                    type_name=type_name,
+                    is_optional=True,
+                    options={
+                        "applicableEntityTypes": json.dumps([atlas_entity_type.name]),
+                        **({"maxStrLength": "50"} if type_name == "string" else {}),
+                    },
+                )
+                for name, type_name in (
+                    ("owner_name", "string"),
+                    ("rank", "int"),
+                    ("reviewed", "boolean"),
+                )
+            ],
+        ),
+        force=True,
+    )
 
 
 # ---------------------------------------------------------------------------

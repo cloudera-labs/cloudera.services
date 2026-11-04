@@ -18,10 +18,15 @@ from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
 
+import json
 import uuid
 
 import pytest
 
+from ansible_collections.cloudera.services.plugins.module_utils.atlas import (
+    AtlasAttributeDef,
+    AtlasBusinessMetadataDef,
+)
 from ansible_collections.cloudera.services.plugins.module_utils.atlas_entity import (
     AtlasEntity,
 )
@@ -159,3 +164,210 @@ def test_purge_entities_removes_a_deleted_entity(
     atlas_entity_client.purge_entities([guid])
 
     assert atlas_entity_client.get_entity_by_guid(guid) is None
+
+
+def _business_attributes(atlas_entity_client, guid, name):
+    entity = atlas_entity_client.get_entity_by_guid(guid)
+    assert entity is not None
+    # Atlas omits businessAttributes once the last business metadata is removed
+    business = entity.business_attributes
+    return business.get(name) if isinstance(business, dict) else None
+
+
+def test_set_entity_business_metadata(
+    atlas_entity_client,
+    atlas_entity_business_metadata_def,
+    atlas_deletable_entity,
+):
+    """Test setting business metadata attributes returns nothing and Atlas stores them."""
+    guid = str(atlas_deletable_entity.guid)
+    name = atlas_entity_business_metadata_def.name
+
+    result = atlas_entity_client.set_entity_business_metadata(
+        guid,
+        name,
+        {"owner_name": "alice", "rank": 3, "reviewed": True},
+    )
+
+    assert result is None
+    assert _business_attributes(atlas_entity_client, guid, name) == {
+        "owner_name": "alice",
+        "rank": 3,
+        "reviewed": True,
+    }
+
+
+def test_set_entity_business_metadata_merges_within_the_business_metadata(
+    atlas_entity_client,
+    atlas_entity_business_metadata_def,
+    atlas_deletable_entity,
+):
+    """Test a second set adds and changes attributes but keeps the ones it does not mention."""
+    guid = str(atlas_deletable_entity.guid)
+    name = atlas_entity_business_metadata_def.name
+
+    atlas_entity_client.set_entity_business_metadata(
+        guid,
+        name,
+        {"owner_name": "alice", "rank": 1},
+    )
+    atlas_entity_client.set_entity_business_metadata(guid, name, {"rank": 2})
+
+    assert _business_attributes(atlas_entity_client, guid, name) == {
+        "owner_name": "alice",
+        "rank": 2,
+    }
+
+
+def test_set_entity_business_metadata_keeps_other_business_metadata(
+    atlas_entity_client,
+    atlas_typedef_client,
+    atlas_purge_typedef,
+    atlas_entity_type,
+    atlas_entity_business_metadata_def,
+    atlas_deletable_entity,
+):
+    """Test setting one business metadata leaves the others alone, because isOverwrite is false."""
+    guid = str(atlas_deletable_entity.guid)
+    first = atlas_entity_business_metadata_def.name
+    second = atlas_purge_typedef(f"{first}_two", force=True)
+    atlas_typedef_client.create_business_metadata_def(
+        AtlasBusinessMetadataDef(
+            name=second,
+            attribute_defs=[
+                AtlasAttributeDef(
+                    name="owner_name",
+                    type_name="string",
+                    is_optional=True,
+                    options={
+                        "applicableEntityTypes": json.dumps([atlas_entity_type.name]),
+                        "maxStrLength": "50",
+                    },
+                ),
+            ],
+        ),
+    )
+
+    atlas_entity_client.set_entity_business_metadata(
+        guid,
+        first,
+        {"owner_name": "alice"},
+    )
+    atlas_entity_client.set_entity_business_metadata(
+        guid,
+        second,
+        {"owner_name": "bob"},
+    )
+
+    assert _business_attributes(atlas_entity_client, guid, first) == {
+        "owner_name": "alice",
+    }
+    assert _business_attributes(atlas_entity_client, guid, second) == {
+        "owner_name": "bob",
+    }
+
+
+def test_set_entity_business_metadata_stores_strings_as_the_declared_type(
+    atlas_entity_client,
+    atlas_entity_business_metadata_def,
+    atlas_deletable_entity,
+):
+    """Test Atlas stores "5" for an int attribute as 5, which is why the module converts values before it compares."""
+    guid = str(atlas_deletable_entity.guid)
+    name = atlas_entity_business_metadata_def.name
+
+    atlas_entity_client.set_entity_business_metadata(guid, name, {"rank": "5"})
+
+    stored = _business_attributes(atlas_entity_client, guid, name)
+    assert stored is not None
+    assert stored == {"rank": 5}
+    assert type(stored["rank"]) is int
+
+
+def test_set_entity_business_metadata_ignores_unknown_attributes(
+    atlas_entity_client,
+    atlas_entity_business_metadata_def,
+    atlas_deletable_entity,
+):
+    """Test Atlas silently accepts and drops an attribute the typedef lacks, which is why the module validates names."""
+    guid = str(atlas_deletable_entity.guid)
+    name = atlas_entity_business_metadata_def.name
+
+    atlas_entity_client.set_entity_business_metadata(
+        guid,
+        name,
+        {"owner_name": "alice", "no_such_attribute": "x"},
+    )
+
+    assert _business_attributes(atlas_entity_client, guid, name) == {
+        "owner_name": "alice",
+    }
+
+
+def test_set_entity_business_metadata_not_applicable_to_type_fails(
+    atlas_entity_client,
+    atlas_rest_client,
+    atlas_deletable_business_metadata_def,
+    atlas_deletable_entity,
+):
+    """Test a business metadata that does not apply to the entity's type is an error (Atlas answers HTTP 404)."""
+    with pytest.raises(AnsibleFailJson):
+        atlas_entity_client.set_entity_business_metadata(
+            str(atlas_deletable_entity.guid),
+            atlas_deletable_business_metadata_def.name,
+            {"owner": "alice"},
+        )
+
+    assert atlas_rest_client.module.fail_json.call_args.kwargs["msg"]
+
+
+def test_set_entity_business_metadata_unknown_business_metadata_fails(
+    atlas_entity_client,
+    atlas_rest_client,
+    atlas_deletable_entity,
+):
+    """Test a business metadata name with no typedef is an error."""
+    with pytest.raises(AnsibleFailJson):
+        atlas_entity_client.set_entity_business_metadata(
+            str(atlas_deletable_entity.guid),
+            "ansible_test_no_such_business_metadata",
+            {"owner_name": "alice"},
+        )
+
+    assert atlas_rest_client.module.fail_json.call_args.kwargs["msg"]
+
+
+def test_set_entity_business_metadata_unknown_entity_fails(
+    atlas_entity_client,
+    atlas_rest_client,
+    atlas_entity_business_metadata_def,
+):
+    """Test setting business metadata on an unknown guid is an error."""
+    with pytest.raises(AnsibleFailJson):
+        atlas_entity_client.set_entity_business_metadata(
+            UNKNOWN_GUID,
+            atlas_entity_business_metadata_def.name,
+            {"owner_name": "alice"},
+        )
+
+    assert atlas_rest_client.module.fail_json.call_args.kwargs["msg"]
+
+
+def test_remove_entity_business_metadata(
+    atlas_entity_client,
+    atlas_entity_business_metadata_def,
+    atlas_deletable_entity,
+):
+    """Test removing business metadata deletes the whole business metadata with all its attributes."""
+    guid = str(atlas_deletable_entity.guid)
+    name = atlas_entity_business_metadata_def.name
+
+    atlas_entity_client.set_entity_business_metadata(
+        guid,
+        name,
+        {"owner_name": "alice", "rank": 1},
+    )
+    result = atlas_entity_client.remove_entity_business_metadata(guid, name)
+
+    assert result is None
+    assert _business_attributes(atlas_entity_client, guid, name) is None

@@ -24,10 +24,14 @@ from ansible_collections.cloudera.services.plugins.module_utils.common import (
     ServicesClient,
     ServicesError,
 )
+from ansible_collections.cloudera.services.plugins.module_utils.atlas import (
+    AtlasAttributeDef,
+)
 from ansible_collections.cloudera.services.plugins.module_utils.atlas_entity import (
     AtlasClassification,
     AtlasEntity,
     AtlasEntityClient,
+    normalize_business_attributes,
     validate_labels,
 )
 
@@ -372,3 +376,183 @@ def test_validate_labels_rejects_invalid_labels(label):
         validate_labels(["ok", label])
 
     assert repr(label) in str(e.value) or label in str(e.value)
+
+
+def test_set_entity_business_metadata(mocker):
+    """Test attributes are POSTed to the named business metadata without overwriting the others."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.post.return_value = None
+
+    result = AtlasEntityClient(api_client).set_entity_business_metadata(
+        GUID,
+        "my_bm",
+        {"ownerName": "alice", "n": 6},
+    )
+
+    assert result is None
+    api_client.post.assert_called_once_with(
+        f"/api/atlas/v2/entity/guid/{GUID}/businessmetadata/my_bm",
+        params={"isOverwrite": "false"},
+        data={"ownerName": "alice", "n": 6},
+    )
+
+
+def test_set_entity_business_metadata_never_overwrites(mocker):
+    """Test isOverwrite=true, which wipes every other business metadata, is never sent."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+
+    AtlasEntityClient(api_client).set_entity_business_metadata(GUID, "my_bm", {"a": 1})
+
+    assert api_client.post.call_args.kwargs["params"] == {"isOverwrite": "false"}
+
+
+def test_set_entity_business_metadata_quotes_path_segments(mocker):
+    """Test the guid and name are quoted so they cannot alter the request path."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+
+    AtlasEntityClient(api_client).set_entity_business_metadata("a/b?c", "d/e", {"a": 1})
+
+    assert api_client.post.call_args.args[0] == (
+        "/api/atlas/v2/entity/guid/a%2Fb%3Fc/businessmetadata/d%2Fe"
+    )
+
+
+def test_remove_entity_business_metadata(mocker):
+    """Test the whole business metadata is deleted, with no body (Atlas ignores one)."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+
+    result = AtlasEntityClient(api_client).remove_entity_business_metadata(
+        GUID,
+        "my_bm",
+    )
+
+    assert result is None
+    api_client.delete.assert_called_once_with(
+        f"/api/atlas/v2/entity/guid/{GUID}/businessmetadata/my_bm",
+    )
+
+
+def test_remove_entity_business_metadata_quotes_path_segments(mocker):
+    """Test the guid and name are quoted so they cannot alter the request path."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+
+    AtlasEntityClient(api_client).remove_entity_business_metadata("a/b?c", "d/e")
+
+    assert api_client.delete.call_args.args[0] == (
+        "/api/atlas/v2/entity/guid/a%2Fb%3Fc/businessmetadata/d%2Fe"
+    )
+
+
+BM_ATTRIBUTE_DEFS = [
+    AtlasAttributeDef(name="ownerName", type_name="string"),
+    AtlasAttributeDef(name="rank", type_name="int"),
+    AtlasAttributeDef(name="score", type_name="double"),
+    AtlasAttributeDef(name="active", type_name="boolean"),
+    AtlasAttributeDef(name="since", type_name="date"),
+    AtlasAttributeDef(name="tags", type_name="array<string>"),
+    AtlasAttributeDef(name="levels", type_name="array<int>"),
+    AtlasAttributeDef(name="kind", type_name="some_enum"),
+]
+
+
+def test_normalize_business_attributes_keeps_typed_values():
+    """Test values already of the declared type pass through unchanged."""
+    attributes = {
+        "ownerName": "alice",
+        "rank": 5,
+        "score": 1.5,
+        "active": True,
+        "since": 1793110013191,
+        "tags": ["a", "b"],
+        "levels": [1, 2],
+        "kind": "HIGH",
+    }
+
+    assert normalize_business_attributes("my_bm", BM_ATTRIBUTE_DEFS, attributes) == (
+        attributes
+    )
+
+
+def test_normalize_business_attributes_coerces_strings_like_atlas():
+    """Test strings become the declared type, as Atlas stores "5" as 5, so a repeat run is idempotent."""
+    result = normalize_business_attributes(
+        "my_bm",
+        BM_ATTRIBUTE_DEFS,
+        {
+            "rank": "5",
+            "score": "2.5",
+            "active": "True",
+            "since": "1793110013191",
+            "ownerName": 42,
+            "levels": ["1", 2],
+        },
+    )
+
+    assert result == {
+        "rank": 5,
+        "score": 2.5,
+        "active": True,
+        "since": 1793110013191,
+        "ownerName": "42",
+        "levels": [1, 2],
+    }
+    assert type(result["rank"]) is int
+    assert type(result["active"]) is bool
+
+
+@pytest.mark.parametrize("name", ["rank", "score", "since", "tags"])
+def test_normalize_business_attributes_rejects_null(name):
+    """Test null is refused, because Atlas cannot clear one attribute and would store nothing useful."""
+    with pytest.raises(ServicesError) as e:
+        normalize_business_attributes("my_bm", BM_ATTRIBUTE_DEFS, {name: None})
+
+    assert name in str(e.value)
+    assert "null" in str(e.value)
+
+
+def test_normalize_business_attributes_rejects_unknown_attributes():
+    """Test an attribute missing from the typedef fails, because Atlas silently ignores it."""
+    with pytest.raises(ServicesError) as e:
+        normalize_business_attributes(
+            "my_bm",
+            BM_ATTRIBUTE_DEFS,
+            {"rank": 1, "ownerNmae": "typo", "other": "x"},
+        )
+
+    message = str(e.value)
+    assert "my_bm" in message
+    assert "ownerNmae" in message
+    assert "other" in message
+    assert "ownerName" in message  # lists what is defined
+
+
+def test_normalize_business_attributes_with_no_attribute_defs_rejects_all():
+    """Test a typedef without attributes (as Atlas may return it) accepts nothing."""
+    with pytest.raises(ServicesError):
+        normalize_business_attributes("my_bm", None, {"rank": 1})
+
+
+@pytest.mark.parametrize(
+    "name, value",
+    [
+        ("rank", "five"),
+        ("rank", 1.5),
+        ("rank", True),
+        ("rank", [1]),
+        ("score", "high"),
+        ("active", "yes"),
+        ("active", 1),
+        ("since", "yesterday"),
+        ("ownerName", {"a": 1}),
+        ("ownerName", ["a"]),
+        ("tags", "a"),
+        ("tags", [["a"]]),
+        ("levels", ["x"]),
+    ],
+)
+def test_normalize_business_attributes_rejects_wrong_types(name, value):
+    """Test a value that cannot be the declared type fails and names the attribute and type."""
+    with pytest.raises(ServicesError) as e:
+        normalize_business_attributes("my_bm", BM_ATTRIBUTE_DEFS, {name: value})
+
+    assert name in str(e.value)
