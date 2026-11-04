@@ -276,7 +276,7 @@ class AtlasEntityBusinessMetadataModule(ServicesModule):
         existing: Dict[str, Any] = current or {}
 
         definition = AtlasTypeDefClient(
-            self.api_client
+            self.api_client,
         ).get_business_metadata_def_by_name(
             self.name,
         )

@@ -761,7 +761,7 @@ def test_atlas_entity_business_metadata_module_absent_requests(module_args, mock
     assert e.value["changed"] is True
     assert [c[0] for c in calls] == ["GET", "DELETE"]
     assert calls[1][1].endswith(
-        f"/api/atlas/v2/entity/guid/{GUID}/businessmetadata/{BM}"
+        f"/api/atlas/v2/entity/guid/{GUID}/businessmetadata/{BM}",
     )
     assert not calls[1][2]
 
