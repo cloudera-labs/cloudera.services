@@ -447,9 +447,9 @@ class AtlasEntityModule(ServicesModule):
             self.result_entity = replace(
                 current,
                 attributes={**existing, **delta},
-                custom_attributes=merged_custom
-                if custom_delta
-                else current.custom_attributes,
+                custom_attributes=(
+                    merged_custom if custom_delta else current.custom_attributes
+                ),
             )
             return
 
@@ -497,9 +497,11 @@ class AtlasEntityModule(ServicesModule):
                     "entity": {
                         "guid": guid,
                         "type_name": entity.type_name,
-                        "attributes": entity.attributes
-                        if isinstance(entity.attributes, dict)
-                        else {},
+                        "attributes": (
+                            entity.attributes
+                            if isinstance(entity.attributes, dict)
+                            else {}
+                        ),
                     },
                 },
                 "after": {"entity": {}},

@@ -94,7 +94,7 @@ def typedefs(mocker):
         "Referenceable": AtlasEntityDef(
             name="Referenceable",
             attribute_defs=[
-                AtlasAttributeDef(name="qualifiedName", type_name="string")
+                AtlasAttributeDef(name="qualifiedName", type_name="string"),
             ],
         ),
         "hive_table": AtlasEntityDef(
@@ -560,7 +560,9 @@ def test_atlas_entity_module_created_entity_not_active_fails(
 
 
 @pytest.mark.parametrize(
-    "read_back", [None, _entity(status="DELETED")], ids=["gone", "deleted"]
+    "read_back",
+    [None, _entity(status="DELETED")],
+    ids=["gone", "deleted"],
 )
 def test_atlas_entity_module_update_not_visible_afterwards_fails(
     module_args,
@@ -651,7 +653,9 @@ def test_atlas_entity_module_absent_is_idempotent(module_args, mocker, typedefs)
 
 
 @pytest.mark.parametrize(
-    "entity", [None, _entity(status="DELETED")], ids=["unknown", "deleted"]
+    "entity",
+    [None, _entity(status="DELETED")],
+    ids=["unknown", "deleted"],
 )
 def test_atlas_entity_module_absent_by_guid_without_an_active_entity_is_a_no_op(
     module_args,

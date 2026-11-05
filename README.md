@@ -19,6 +19,7 @@
   * Type definitions (enums, structs, classifications, entities, relationships, and business metadata) and queries for existing type definitions
   * Look up entities, such as Hive tables, by GUID or qualified name
   * Add and remove entity labels, business metadata, and classifications
+  * Create, update, and delete entities of custom types
 
 and more!
 
