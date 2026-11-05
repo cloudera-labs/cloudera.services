@@ -20,9 +20,6 @@ on:
   pull_request:
   workflow_dispatch:
 
-env:
-  HATCH_DATA_DIR: ~/.hatch
-
 jobs:
   validate-docs:
     name: Validate API documentation
@@ -53,14 +50,6 @@ jobs:
 
       - name: Install Hatch
         run: pip install hatch
-
-      - name: Cache Hatch virtual environments
-        uses: actions/cache@v6
-        with:
-          path: ${{ env.HATCH_DATA_DIR }}
-          key: hatch-${{ runner.os }}-${{ hashFiles('**/pyproject.toml') }} # '**/hatch.lock' when hatch.lock is supported
-          restore-keys: |
-            hatch-${{ runner.os }}-
 
       - name: Render API documentation
         run: hatch run docs:render
