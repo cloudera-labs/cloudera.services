@@ -20,7 +20,7 @@ REST client for Apache Atlas entity instances.
 
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 from urllib.parse import quote
 
 from ansible_collections.cloudera.services.plugins.module_utils.common import (
@@ -226,6 +226,34 @@ def normalize_business_attributes(
     )
 
 
+def _inherited_attribute_defs(
+    get_def: Callable[[str], Any],
+    name: str,
+) -> Optional[List[AtlasAttributeDef]]:
+    """Collect the attributes of a typedef and of all its super types, or None if there is no such typedef."""
+    root = get_def(name)
+    if root is None:
+        return None
+
+    attribute_defs: List[AtlasAttributeDef] = []
+    seen = {name}
+    pending = [root]
+    while pending:
+        typedef = pending.pop(0)
+        if isinstance(typedef.attribute_defs, list):
+            attribute_defs.extend(typedef.attribute_defs)
+        if isinstance(typedef.super_types, list):
+            for super_type in typedef.super_types:
+                if super_type in seen:
+                    continue
+                seen.add(super_type)
+                super_def = get_def(super_type)
+                if super_def is not None:
+                    pending.append(super_def)
+
+    return attribute_defs
+
+
 def classification_attribute_defs(
     typedef_client: AtlasTypeDefClient,
     name: str,
@@ -237,27 +265,21 @@ def classification_attribute_defs(
     A classification inherits the attributes of its super types, and Atlas silently
     drops an attribute that is not among them.
     """
-    root = typedef_client.get_classification_def_by_name(name)
-    if root is None:
-        return None
+    return _inherited_attribute_defs(
+        typedef_client.get_classification_def_by_name,
+        name,
+    )
 
-    attribute_defs: List[AtlasAttributeDef] = []
-    seen = {name}
-    pending = [root]
-    while pending:
-        classification_def = pending.pop(0)
-        if isinstance(classification_def.attribute_defs, list):
-            attribute_defs.extend(classification_def.attribute_defs)
-        if isinstance(classification_def.super_types, list):
-            for super_type in classification_def.super_types:
-                if super_type in seen:
-                    continue
-                seen.add(super_type)
-                super_def = typedef_client.get_classification_def_by_name(super_type)
-                if super_def is not None:
-                    pending.append(super_def)
 
-    return attribute_defs
+def entity_attribute_defs(
+    typedef_client: AtlasTypeDefClient,
+    name: str,
+) -> Optional[List[AtlasAttributeDef]]:
+    """
+    Return the attributes of an entity typedef and of all its super types (such as
+    `qualifiedName` from Referenceable), or None if there is no such entity type.
+    """
+    return _inherited_attribute_defs(typedef_client.get_entity_def_by_name, name)
 
 
 def _classification_payload(classification: AtlasClassification) -> Dict[str, Any]:
@@ -375,14 +397,49 @@ class AtlasEntityClient:
 
         return created
 
-    def delete_entity_by_guid(self, guid: str) -> None:
+    def update_entity_by_unique_attributes(
+        self,
+        type_name: str,
+        unique_attributes: Dict[str, Any],
+        entity: AtlasEntity,
+    ) -> None:
         """
-        Delete an entity by guid.
+        Partially update an entity addressed by its unique attributes.
+
+        Only the attributes in `entity` change. A POST of the entity would instead
+        fail unless it carried every mandatory attribute.
+        """
+        params: Dict[str, Any] = {
+            f"attr:{name}": value for name, value in unique_attributes.items()
+        }
+
+        self.api_client.put(
+            f"{ENTITY_API}/uniqueAttribute/type/{quote(type_name, safe='')}",
+            params=params,
+            data=_entity_to_payload(entity),
+        )
+
+    def delete_entity_by_guid(self, guid: str) -> List[str]:
+        """
+        Delete an entity by guid and return the guids Atlas deleted.
 
         Atlas answers HTTP 200 whether or not the guid exists, and the delete is
-        soft: the entity remains with status DELETED until it is purged.
+        soft: the entity remains with status DELETED until it is purged. The list
+        is empty for an unknown or deleted guid, and holds more than the guid when
+        the delete cascades to owned entities.
         """
-        self.api_client.delete(f"{ENTITY_API}/guid/{quote(guid, safe='')}")
+        result = self.api_client.delete(f"{ENTITY_API}/guid/{quote(guid, safe='')}")
+
+        mutated = result.get("mutatedEntities") if isinstance(result, dict) else None
+        deleted = mutated.get("DELETE") if isinstance(mutated, dict) else None
+        if not isinstance(deleted, list):
+            return []
+
+        return [
+            str(item["guid"])
+            for item in deleted
+            if isinstance(item, dict) and item.get("guid")
+        ]
 
     def set_entity_labels(self, guid: str, labels: List[str]) -> None:
         """
