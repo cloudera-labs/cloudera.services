@@ -220,23 +220,20 @@ class AtlasEntityLabelModule(ServicesModule):
             self.module.fail_json(
                 msg="'exclusive' can only be used with state 'present'.",
             )
-            return
 
         validate_labels(self.labels)
 
         client = AtlasEntityClient(self.api_client)
 
         entity = self._find_entity(client)
-        active = entity is not None and entity.status == "ACTIVE"
 
-        if not active:
+        if entity is None or entity.status != "ACTIVE":
             if self.state == "present":
                 self.module.fail_json(
                     msg="Labels can only be set on an active entity, but the entity was not found or is deleted.",
                 )
             return
 
-        assert entity is not None
         self.result_guid = str(entity.guid)
         current: List[str] = entity.labels if isinstance(entity.labels, list) else []
 
@@ -269,7 +266,6 @@ class AtlasEntityLabelModule(ServicesModule):
             self.module.fail_json(
                 msg="Specify 'qualified_name' or 'unique_attributes' with 'type_name'.",
             )
-            return None
 
         return client.get_entity_by_unique_attributes(
             str(self.type_name),
