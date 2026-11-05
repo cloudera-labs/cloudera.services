@@ -48,6 +48,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Update pip
+        run: pip install --upgrade pip
+
       - name: Install Hatch
         run: pip install hatch
 
