@@ -166,6 +166,76 @@ def test_purge_entities_removes_a_deleted_entity(
     assert atlas_entity_client.get_entity_by_guid(guid) is None
 
 
+def _labels(atlas_entity_client, guid):
+    entity = atlas_entity_client.get_entity_by_guid(guid)
+    assert entity is not None
+    # Atlas may omit labels for an entity that has none
+    return entity.labels if isinstance(entity.labels, list) else []
+
+
+def test_set_entity_labels(atlas_entity_client, atlas_deletable_entity):
+    """Test setting labels returns nothing and Atlas stores them."""
+    guid = str(atlas_deletable_entity.guid)
+
+    result = atlas_entity_client.set_entity_labels(guid, ["ansible-one", "two_2"])
+
+    assert result is None
+    assert set(_labels(atlas_entity_client, guid)) == {"ansible-one", "two_2"}
+
+
+def test_set_entity_labels_replaces_the_whole_list(
+    atlas_entity_client,
+    atlas_deletable_entity,
+):
+    """Test a second set replaces the labels instead of adding to them (POST sets the whole list)."""
+    guid = str(atlas_deletable_entity.guid)
+
+    atlas_entity_client.set_entity_labels(guid, ["first", "second"])
+    atlas_entity_client.set_entity_labels(guid, ["third"])
+
+    assert _labels(atlas_entity_client, guid) == ["third"]
+
+
+def test_set_entity_labels_empty_list_clears(
+    atlas_entity_client,
+    atlas_deletable_entity,
+):
+    """Test setting an empty list removes every label, the only way to remove labels through Knox."""
+    guid = str(atlas_deletable_entity.guid)
+
+    atlas_entity_client.set_entity_labels(guid, ["first", "second"])
+    atlas_entity_client.set_entity_labels(guid, [])
+
+    assert _labels(atlas_entity_client, guid) == []
+
+
+def test_set_entity_labels_invalid_label_fails(
+    atlas_entity_client,
+    atlas_rest_client,
+    atlas_deletable_entity,
+):
+    """Test a label Atlas rejects (HTTP 400, ATLAS-400-00-090) is an error and changes nothing."""
+    guid = str(atlas_deletable_entity.guid)
+    atlas_entity_client.set_entity_labels(guid, ["keep"])
+
+    with pytest.raises(AnsibleFailJson):
+        atlas_entity_client.set_entity_labels(guid, ["has space"])
+
+    assert atlas_rest_client.module.fail_json.call_args.kwargs["msg"]
+    assert _labels(atlas_entity_client, guid) == ["keep"]
+
+
+def test_set_entity_labels_unknown_entity_fails(
+    atlas_entity_client,
+    atlas_rest_client,
+):
+    """Test setting labels on an unknown guid is an error."""
+    with pytest.raises(AnsibleFailJson):
+        atlas_entity_client.set_entity_labels(UNKNOWN_GUID, ["a"])
+
+    assert atlas_rest_client.module.fail_json.call_args.kwargs["msg"]
+
+
 def _business_attributes(atlas_entity_client, guid, name):
     entity = atlas_entity_client.get_entity_by_guid(guid)
     assert entity is not None
