@@ -114,7 +114,7 @@ changelog = [
   "antsibull-changelog generate",
 ]
 render = [
-  # Read and parse the collection docs into a temporary directory. Use for liniting.
+  # Read and parse the collection docs into a temporary directory. Use for linting.
   "rm -rf docsbuild/build docsbuild/rst docsbuild/temp-rst",
   "mkdir -m 0755 -p docsbuild/temp-rst",
   """

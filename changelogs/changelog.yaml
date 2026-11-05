@@ -1,126 +1,222 @@
-ancestor: null
+---
+ancestor:
 releases:
+  1.1.0:
+    changes:
+      minor_changes:
+        - Add integration tests for Atlas entity label module utility functions (https://github.com/cloudera-labs/cloudera.services/pull/43)
+        - Add atlas_entity_business_metadata module and unit and integration tests
+          (https://github.com/cloudera-labs/cloudera.services/pull/42)
+        - Update ssb_job module with 'wait' parameter (https://github.com/cloudera-labs/cloudera.services/pull/40)
+        - Add atlas_entity_label module and unit and integration tests (https://github.com/cloudera-labs/cloudera.services/pull/39)
+        - Update replica and ISR descriptions to use RV notation in smm_kafka_topic  modules
+          (https://github.com/cloudera-labs/cloudera.services/pull/38)
+        - Add smm_kafka_topic modules (https://github.com/cloudera-labs/cloudera.services/pull/37)
+        - Add atlas_entity_info module and unit and integration tests (https://github.com/cloudera-labs/cloudera.services/pull/36)
+        - Update ServicesClient data parameter annotations (https://github.com/cloudera-labs/cloudera.services/pull/35)
+        - Update Atlas documentation for consolidated TypeDef functions and test utilities
+          (https://github.com/cloudera-labs/cloudera.services/pull/34)
+        - Consolidate Atlas TypeDef testing utilities (https://github.com/cloudera-labs/cloudera.services/pull/33)
+        - Consolidate Atlas TypeDef module utilities (https://github.com/cloudera-labs/cloudera.services/pull/32)
+        - Refactor Atlas EnumDef and ClassificationDef bundle extraction (https://github.com/cloudera-labs/cloudera.services/pull/31)
+        - Update ML action groups (https://github.com/cloudera-labs/cloudera.services/pull/28)
+        - Add SSB action groups (https://github.com/cloudera-labs/cloudera.services/pull/27)
+        - Add Ranger policy and role modules to action groups (https://github.com/cloudera-labs/cloudera.services/pull/26)
+        - Add atlas_business_metadata_def module and unit and integration tests (https://github.com/cloudera-labs/cloudera.services/pull/25)
+        - Add atlas_relationship_def module and unit and integration tests (https://github.com/cloudera-labs/cloudera.services/pull/24)
+        - Add atlas_struct_def module and unit and integration tests (https://github.com/cloudera-labs/cloudera.services/pull/23)
+        - Add atlas_entity_def module and unit and integration tests (https://github.com/cloudera-labs/cloudera.services/pull/22)
+        - Add atlas_classification_def module (https://github.com/cloudera-labs/cloudera.services/pull/21)
+        - Add Atlas module utilities, fixtures, and atlas_enum_def and atlas_typedef_info
+          modules (https://github.com/cloudera-labs/cloudera.services/pull/20)
+        - Update environment payload handling in ML project (https://github.com/cloudera-labs/cloudera.services/pull/19)
+        - Add Ranger Role modules (https://github.com/cloudera-labs/cloudera.services/pull/18)
+        - Add Ranger Policy modules (https://github.com/cloudera-labs/cloudera.services/pull/17)
+        - Add Ranger service modules (https://github.com/cloudera-labs/cloudera.services/pull/15)
+      trivial:
+        - Fix atlas_entity_label documentation markup (https://github.com/cloudera-labs/cloudera.services/pull/41)
+        - Update documentation for Relationship and Business Metadata definitions
+          (https://github.com/cloudera-labs/cloudera.services/pull/30)
+        - Update README and agent documentation for Atlas usage and development (https://github.com/cloudera-labs/cloudera.services/pull/29)
+    modules:
+      - description: Manage business metadata type definitions in Apache Atlas.
+        name: atlas_business_metadata_def
+        namespace: ''
+      - description: Manage classification type definitions in Apache Atlas.
+        name: atlas_classification_def
+        namespace: ''
+      - description: Manage business metadata on an Apache Atlas entity.
+        name: atlas_entity_business_metadata
+        namespace: ''
+      - description: Manage entity type definitions in Apache Atlas.
+        name: atlas_entity_def
+        namespace: ''
+      - description: Retrieve an entity from Apache Atlas.
+        name: atlas_entity_info
+        namespace: ''
+      - description: Manage the labels of an Apache Atlas entity.
+        name: atlas_entity_label
+        namespace: ''
+      - description: Manage enum type definitions in Apache Atlas.
+        name: atlas_enum_def
+        namespace: ''
+      - description: Manage relationship type definitions in Apache Atlas.
+        name: atlas_relationship_def
+        namespace: ''
+      - description: Manage struct type definitions in Apache Atlas.
+        name: atlas_struct_def
+        namespace: ''
+      - description: Retrieve type definitions from Apache Atlas.
+        name: atlas_typedef_info
+        namespace: ''
+      - description: Manage policies in Apache Ranger.
+        name: ranger_policy
+        namespace: ''
+      - description: Retrieve policy details from Apache Ranger.
+        name: ranger_policy_info
+        namespace: ''
+      - description: Manage roles in Apache Ranger.
+        name: ranger_role
+        namespace: ''
+      - description: Retrieve role details from Apache Ranger.
+        name: ranger_role_info
+        namespace: ''
+      - description: Manage services in Apache Ranger.
+        name: ranger_service
+        namespace: ''
+      - description: Retrieve service details from Apache Ranger.
+        name: ranger_service_info
+        namespace: ''
+      - description: Manage Kafka topics in Streams Messaging Manager.
+        name: smm_kafka_topic
+        namespace: ''
+      - description: Retrieve Kafka topic details from Streams Messaging Manager.
+        name: smm_kafka_topic_info
+        namespace: ''
+    release_date: '2026-11-05'
   1.0.0:
     modules:
-    - description: Create and delete Cloudera Machine Learning (CML) projects.
-      name: ml_project
-      namespace: ''
-    - description: Manage a Cloudera Machine Learning (CML) project application.
-      name: ml_project_application
-      namespace: ''
-    - description: Retrieve information about Cloudera Machine Learning (CML) project
-        applications.
-      name: ml_project_application_info
-      namespace: ''
-    - description: Manage a file within a Cloudera Machine Learning (CML) project.
-      name: ml_project_file
-      namespace: ''
-    - description: Retrieve information about files within a Cloudera Machine Learning
-        (CML) project.
-      name: ml_project_file_info
-      namespace: ''
-    - description: Retrieve information about Cloudera Machine Learning (CML) projects.
-      name: ml_project_info
-      namespace: ''
-    - description: Manage a Cloudera Machine Learning (CML) project job.
-      name: ml_project_job
-      namespace: ''
-    - description: Retrieve information about Cloudera Machine Learning (CML) project
-        jobs.
-      name: ml_project_job_info
-      namespace: ''
-    - description: Start or stop a Cloudera Machine Learning (CML) project job run.
-      name: ml_project_job_run
-      namespace: ''
-    - description: Retrieve information about Cloudera Machine Learning (CML) project
-        job runs.
-      name: ml_project_job_run_info
-      namespace: ''
-    - description: Manage a Cloudera Machine Learning (CML) project model.
-      name: ml_project_model
-      namespace: ''
-    - description: Manage a Cloudera Machine Learning (CML) project model build.
-      name: ml_project_model_build
-      namespace: ''
-    - description: Retrieve information about Cloudera Machine Learning (CML) project
-        model builds.
-      name: ml_project_model_build_info
-      namespace: ''
-    - description: Manage a Cloudera Machine Learning (CML) project model deployment.
-      name: ml_project_model_deployment
-      namespace: ''
-    - description: Retrieve information about Cloudera Machine Learning (CML) project
-        model deployments.
-      name: ml_project_model_deployment_info
-      namespace: ''
-    - description: Retrieve information about Cloudera Machine Learning (CML) project
-        models.
-      name: ml_project_model_info
-      namespace: ''
-    - description: Register or set the status of a Cloudera Machine Learning (CML)
-        runtime.
-      name: ml_runtime
-      namespace: ''
-    - description: Manage the status of Cloudera Machine Learning (CML) runtime addons.
-      name: ml_runtime_addon
-      namespace: ''
-    - description: Retrieve information about Cloudera Machine Learning (CML) runtime
-        addons.
-      name: ml_runtime_addon_info
-      namespace: ''
-    - description: Retrieve information about Cloudera Machine Learning (CML) runtimes.
-      name: ml_runtime_info
-      namespace: ''
-    - description: Manage a Cloudera Machine Learning (CML) runtime repository.
-      name: ml_runtime_repo
-      namespace: ''
-    - description: Retrieve information about Cloudera Machine Learning (CML) runtime
-        repositories.
-      name: ml_runtime_repo_info
-      namespace: ''
-    - description: Manage SSB project data sources.
-      name: ssb_data_source
-      namespace: ''
-    - description: Retrieve information about SSB project data sources.
-      name: ssb_data_source_info
-      namespace: ''
-    - description: Manage SSB project environments.
-      name: ssb_environment
-      namespace: ''
-    - description: Retrieve information about SSB project environments.
-      name: ssb_environment_info
-      namespace: ''
-    - description: Manage SSB jobs.
-      name: ssb_job
-      namespace: ''
-    - description: Retrieve information about SSB jobs.
-      name: ssb_job_info
-      namespace: ''
-    - description: Manage SSB projects.
-      name: ssb_project
-      namespace: ''
-    - description: Retrieve information about SSB projects.
-      name: ssb_project_info
-      namespace: ''
-    - description: Manage SSB project tables.
-      name: ssb_table
-      namespace: ''
-    - description: Retrieve information about SSB project tables.
-      name: ssb_table_info
-      namespace: ''
-    - description: Manage SSB User Defined Functions (UDFs).
-      name: ssb_udf
-      namespace: ''
-    - description: Retrieve information about SSB project User Defined Functions (UDFs).
-      name: ssb_udf_info
-      namespace: ''
-    - description: Manage the current SSB user's settings.
-      name: ssb_user
-      namespace: ''
-    - description: Retrieve information about the current SSB user.
-      name: ssb_user_info
-      namespace: ''
-    - description: Set the user keytab in SSB.
-      name: ssb_user_keytab
-      namespace: ''
+      - description: Create and delete Cloudera Machine Learning (CML) projects.
+        name: ml_project
+        namespace: ''
+      - description: Manage a Cloudera Machine Learning (CML) project application.
+        name: ml_project_application
+        namespace: ''
+      - description: Retrieve information about Cloudera Machine Learning (CML) project
+          applications.
+        name: ml_project_application_info
+        namespace: ''
+      - description: Manage a file within a Cloudera Machine Learning (CML) project.
+        name: ml_project_file
+        namespace: ''
+      - description: Retrieve information about files within a Cloudera Machine Learning
+          (CML) project.
+        name: ml_project_file_info
+        namespace: ''
+      - description: Retrieve information about Cloudera Machine Learning (CML) projects.
+        name: ml_project_info
+        namespace: ''
+      - description: Manage a Cloudera Machine Learning (CML) project job.
+        name: ml_project_job
+        namespace: ''
+      - description: Retrieve information about Cloudera Machine Learning (CML) project
+          jobs.
+        name: ml_project_job_info
+        namespace: ''
+      - description: Start or stop a Cloudera Machine Learning (CML) project job run.
+        name: ml_project_job_run
+        namespace: ''
+      - description: Retrieve information about Cloudera Machine Learning (CML) project
+          job runs.
+        name: ml_project_job_run_info
+        namespace: ''
+      - description: Manage a Cloudera Machine Learning (CML) project model.
+        name: ml_project_model
+        namespace: ''
+      - description: Manage a Cloudera Machine Learning (CML) project model build.
+        name: ml_project_model_build
+        namespace: ''
+      - description: Retrieve information about Cloudera Machine Learning (CML) project
+          model builds.
+        name: ml_project_model_build_info
+        namespace: ''
+      - description: Manage a Cloudera Machine Learning (CML) project model deployment.
+        name: ml_project_model_deployment
+        namespace: ''
+      - description: Retrieve information about Cloudera Machine Learning (CML) project
+          model deployments.
+        name: ml_project_model_deployment_info
+        namespace: ''
+      - description: Retrieve information about Cloudera Machine Learning (CML) project
+          models.
+        name: ml_project_model_info
+        namespace: ''
+      - description: Register or set the status of a Cloudera Machine Learning (CML)
+          runtime.
+        name: ml_runtime
+        namespace: ''
+      - description: Manage the status of Cloudera Machine Learning (CML) runtime
+          addons.
+        name: ml_runtime_addon
+        namespace: ''
+      - description: Retrieve information about Cloudera Machine Learning (CML) runtime
+          addons.
+        name: ml_runtime_addon_info
+        namespace: ''
+      - description: Retrieve information about Cloudera Machine Learning (CML) runtimes.
+        name: ml_runtime_info
+        namespace: ''
+      - description: Manage a Cloudera Machine Learning (CML) runtime repository.
+        name: ml_runtime_repo
+        namespace: ''
+      - description: Retrieve information about Cloudera Machine Learning (CML) runtime
+          repositories.
+        name: ml_runtime_repo_info
+        namespace: ''
+      - description: Manage SSB project data sources.
+        name: ssb_data_source
+        namespace: ''
+      - description: Retrieve information about SSB project data sources.
+        name: ssb_data_source_info
+        namespace: ''
+      - description: Manage SSB project environments.
+        name: ssb_environment
+        namespace: ''
+      - description: Retrieve information about SSB project environments.
+        name: ssb_environment_info
+        namespace: ''
+      - description: Manage SSB jobs.
+        name: ssb_job
+        namespace: ''
+      - description: Retrieve information about SSB jobs.
+        name: ssb_job_info
+        namespace: ''
+      - description: Manage SSB projects.
+        name: ssb_project
+        namespace: ''
+      - description: Retrieve information about SSB projects.
+        name: ssb_project_info
+        namespace: ''
+      - description: Manage SSB project tables.
+        name: ssb_table
+        namespace: ''
+      - description: Retrieve information about SSB project tables.
+        name: ssb_table_info
+        namespace: ''
+      - description: Manage SSB User Defined Functions (UDFs).
+        name: ssb_udf
+        namespace: ''
+      - description: Retrieve information about SSB project User Defined Functions
+          (UDFs).
+        name: ssb_udf_info
+        namespace: ''
+      - description: Manage the current SSB user's settings.
+        name: ssb_user
+        namespace: ''
+      - description: Retrieve information about the current SSB user.
+        name: ssb_user_info
+        namespace: ''
+      - description: Set the user keytab in SSB.
+        name: ssb_user_keytab
+        namespace: ''
     release_date: '2026-07-29'
