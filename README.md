@@ -18,7 +18,7 @@
 * Manage [Apache Atlas](https://atlas.apache.org/) metadata on CDP Private Cloud Base, including
   * Type definitions (enums, structs, classifications, entities, relationships, and business metadata) and queries for existing type definitions
   * Look up entities, such as Hive tables, by GUID or qualified name
-  * Add and remove entity labels and business metadata
+  * Add and remove entity labels, business metadata, and classifications
 
 and more!
 

@@ -31,6 +31,8 @@ from ansible_collections.cloudera.services.plugins.module_utils.common import (
     ServicesError,
 )
 from ansible_collections.cloudera.services.plugins.module_utils.atlas import (
+    AtlasAttributeDef,
+    AtlasTypeDefClient,
     camel_preserving_options,
     snake_preserving_options,
 )
@@ -41,6 +43,7 @@ _INTEGER_PATTERN = re.compile(r"[+-]?[0-9]+", re.ASCII)
 _INTEGER_TYPES = frozenset({"byte", "short", "int", "long", "date"})
 _FLOAT_TYPES = frozenset({"float", "double"})
 _ARRAY_PATTERN = re.compile(r"array<(.+)>")
+_PRIMITIVE_TYPES = _INTEGER_TYPES | _FLOAT_TYPES | {"boolean", "string"}
 
 ENTITY_API = "/api/atlas/v2/entity"
 ADMIN_API = "/api/atlas/admin"
@@ -110,17 +113,21 @@ def validate_labels(labels: List[str]) -> None:
 
 
 def _normalize_value(attribute: str, type_name: str, value: Any) -> Any:
-    """Convert one business attribute value to the type Atlas stores for type_name."""
+    """Convert one attribute value to the type Atlas stores for type_name."""
     array = _ARRAY_PATTERN.fullmatch(type_name)
     if array:
         if not isinstance(value, list):
             raise ServicesError(
-                f"Business attribute '{attribute}' must be a list ({type_name}), not {value!r}",
+                f"Attribute '{attribute}' must be a list ({type_name}), not {value!r}",
             )
         return [_normalize_value(attribute, array.group(1), item) for item in value]
 
+    if type_name not in _PRIMITIVE_TYPES:
+        # Enums, maps, structs and the like: only Atlas can check them.
+        return value
+
     invalid = ServicesError(
-        f"Business attribute '{attribute}' must be of type {type_name}, not {value!r}",
+        f"Attribute '{attribute}' must be of type {type_name}, not {value!r}",
     )
 
     if isinstance(value, (dict, list)):
@@ -150,25 +157,25 @@ def _normalize_value(attribute: str, type_name: str, value: Any) -> Any:
             return value.lower() == "true"
         raise invalid
 
-    if type_name == "string":
-        return value if isinstance(value, str) else str(value)
-
-    return value
+    return value if isinstance(value, str) else str(value)
 
 
-def normalize_business_attributes(
+def normalize_attributes(
+    owner: str,
     name: str,
     attribute_defs: Any,
     attributes: Dict[str, Any],
+    null_hint: str = "",
 ) -> Dict[str, Any]:
     """
-    Check business attributes against their typedef and convert the values to the
-    types Atlas stores.
+    Check attributes against the typedef that defines them and convert the values to
+    the types Atlas stores.
 
     Atlas silently ignores attributes the typedef does not define, and stores the
     string "5" of an int attribute as 5, so both would otherwise show up as a
     change on every run.
 
+    `owner` ("Business metadata", "Classification") and `name` label the errors.
     Raises ServicesError for an unknown attribute, a null, or a value that cannot
     be the attribute's type.
     """
@@ -182,7 +189,7 @@ def normalize_business_attributes(
     unknown = sorted(set(attributes) - set(types))
     if unknown:
         raise ServicesError(
-            f"Business metadata '{name}' does not define attribute(s) "
+            f"{owner} '{name}' does not define attribute(s) "
             f"{', '.join(unknown)}; it defines: {', '.join(sorted(types)) or 'none'}",
         )
 
@@ -190,12 +197,80 @@ def normalize_business_attributes(
     for attribute, value in attributes.items():
         if value is None:
             raise ServicesError(
-                f"Business attribute '{attribute}' cannot be null; remove the whole "
-                f"business metadata with state 'absent' instead",
+                f"{owner} '{name}' attribute '{attribute}' cannot be null{null_hint}",
             )
-        normalized[attribute] = _normalize_value(attribute, types[attribute], value)
+        try:
+            normalized[attribute] = _normalize_value(
+                attribute,
+                types[attribute],
+                value,
+            )
+        except ServicesError as e:
+            raise ServicesError(f"{owner} '{name}': {e}")
 
     return normalized
+
+
+def normalize_business_attributes(
+    name: str,
+    attribute_defs: Any,
+    attributes: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Check business attributes against their business metadata typedef; see normalize_attributes()."""
+    return normalize_attributes(
+        "Business metadata",
+        name,
+        attribute_defs,
+        attributes,
+        null_hint="; remove the whole business metadata with state 'absent' instead",
+    )
+
+
+def classification_attribute_defs(
+    typedef_client: AtlasTypeDefClient,
+    name: str,
+) -> Optional[List[AtlasAttributeDef]]:
+    """
+    Return the attributes of a classification typedef and of all its super types,
+    or None if there is no such classification.
+
+    A classification inherits the attributes of its super types, and Atlas silently
+    drops an attribute that is not among them.
+    """
+    root = typedef_client.get_classification_def_by_name(name)
+    if root is None:
+        return None
+
+    attribute_defs: List[AtlasAttributeDef] = []
+    seen = {name}
+    pending = [root]
+    while pending:
+        classification_def = pending.pop(0)
+        if isinstance(classification_def.attribute_defs, list):
+            attribute_defs.extend(classification_def.attribute_defs)
+        if isinstance(classification_def.super_types, list):
+            for super_type in classification_def.super_types:
+                if super_type in seen:
+                    continue
+                seen.add(super_type)
+                super_def = typedef_client.get_classification_def_by_name(super_type)
+                if super_def is not None:
+                    pending.append(super_def)
+
+    return attribute_defs
+
+
+def _classification_payload(classification: AtlasClassification) -> Dict[str, Any]:
+    """Serialise a classification into the camelCase body Atlas expects, without the read-only fields."""
+    payload = camel_preserving_options(
+        to_dict(classification),
+        verbatim_keys=(),
+        verbatim_map_keys=(),
+        verbatim_values=ENTITY_VERBATIM_VALUES,
+    )
+    payload.pop("entityGuid", None)
+    payload.pop("entityStatus", None)
+    return payload
 
 
 def _entity_to_payload(entity: AtlasEntity) -> Dict[str, Any]:
@@ -347,6 +422,43 @@ class AtlasEntityClient:
         """
         self.api_client.delete(
             f"{ENTITY_API}/guid/{quote(guid, safe='')}/businessmetadata/{quote(name, safe='')}",
+        )
+
+    def add_entity_classifications(
+        self,
+        guid: str,
+        classifications: List[AtlasClassification],
+    ) -> None:
+        """
+        Attach classifications to an entity.
+
+        Atlas fails if one is already attached directly; use update_entity_classifications().
+        """
+        self.api_client.post(
+            f"{ENTITY_API}/guid/{quote(guid, safe='')}/classifications",
+            data=[_classification_payload(c) for c in classifications],
+        )
+
+    def update_entity_classifications(
+        self,
+        guid: str,
+        classifications: List[AtlasClassification],
+    ) -> None:
+        """
+        Update classifications already attached directly to an entity.
+
+        Atlas merges the attributes given into the existing ones, and fails if a
+        classification is not attached.
+        """
+        self.api_client.put(
+            f"{ENTITY_API}/guid/{quote(guid, safe='')}/classifications",
+            data=[_classification_payload(c) for c in classifications],
+        )
+
+    def remove_entity_classification(self, guid: str, name: str) -> None:
+        """Remove the classification attached directly to an entity; Atlas fails if there is none."""
+        self.api_client.delete(
+            f"{ENTITY_API}/guid/{quote(guid, safe='')}/classification/{quote(name, safe='')}",
         )
 
     def purge_entities(self, guids: List[str]) -> None:

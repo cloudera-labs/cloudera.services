@@ -2599,6 +2599,53 @@ def atlas_deletable_entity(
 
 
 @pytest.fixture
+def atlas_entity_classification_def(
+    request,
+    atlas_typedef_client,
+    atlas_purge_typedef,
+) -> AtlasClassificationDef:
+    """
+    Fixture to create a function-scoped classification typedef with a string and an int
+    attribute, plus a super type with one more string attribute that it inherits.
+
+    Request it before `atlas_deletable_entity`: fixtures tear down in reverse order, so
+    the entity is deleted and purged before Atlas is asked to delete the typedefs.
+    """
+    name = _atlas_type_name("entity_tag", request.node.name)
+    parent_name = f"{name}_parent"
+
+    # Remove leftovers, the sub type first, then register for cleanup in that same order
+    for leftover in (name, parent_name):
+        atlas_typedef_client.delete_typedef_by_name(leftover)
+        atlas_purge_typedef(leftover)
+
+    atlas_typedef_client.create_classification_def(
+        AtlasClassificationDef(
+            name=parent_name,
+            description="Parent classification created by pytest - safe to delete",
+            attribute_defs=[
+                AtlasAttributeDef(
+                    name="inherited",
+                    type_name="string",
+                    is_optional=True,
+                ),
+            ],
+        ),
+    )
+    return atlas_typedef_client.create_classification_def(
+        AtlasClassificationDef(
+            name=name,
+            description="Entity classification created by pytest - safe to delete",
+            super_types=[parent_name],
+            attribute_defs=[
+                AtlasAttributeDef(name="level", type_name="string", is_optional=True),
+                AtlasAttributeDef(name="rank", type_name="int", is_optional=True),
+            ],
+        ),
+    )
+
+
+@pytest.fixture
 def atlas_entity_business_metadata_def(
     request,
     atlas_typedef_client,

@@ -26,11 +26,15 @@ from ansible_collections.cloudera.services.plugins.module_utils.common import (
 )
 from ansible_collections.cloudera.services.plugins.module_utils.atlas import (
     AtlasAttributeDef,
+    AtlasClassificationDef,
+    AtlasTypeDefClient,
 )
 from ansible_collections.cloudera.services.plugins.module_utils.atlas_entity import (
     AtlasClassification,
     AtlasEntity,
     AtlasEntityClient,
+    classification_attribute_defs,
+    normalize_attributes,
     normalize_business_attributes,
     validate_labels,
 )
@@ -556,3 +560,272 @@ def test_normalize_business_attributes_rejects_wrong_types(name, value):
         normalize_business_attributes("my_bm", BM_ATTRIBUTE_DEFS, {name: value})
 
     assert name in str(e.value)
+
+
+def test_add_entity_classifications(mocker):
+    """Test classifications are POSTed as a list; attribute names keep their case."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.post.return_value = None
+
+    result = AtlasEntityClient(api_client).add_entity_classifications(
+        GUID,
+        [
+            AtlasClassification(
+                type_name="my_tag",
+                attributes={"levelOne": "high"},
+                propagate=False,
+                remove_propagations_on_entity_delete=True,
+            ),
+        ],
+    )
+
+    assert result is None
+    api_client.post.assert_called_once_with(
+        f"/api/atlas/v2/entity/guid/{GUID}/classifications",
+        data=[
+            {
+                "typeName": "my_tag",
+                "attributes": {"levelOne": "high"},
+                "propagate": False,
+                "removePropagationsOnEntityDelete": True,
+            },
+        ],
+    )
+
+
+def test_add_entity_classifications_sends_only_what_is_set(mocker):
+    """Test unset fields are left out so Atlas applies its defaults."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+
+    AtlasEntityClient(api_client).add_entity_classifications(
+        GUID,
+        [AtlasClassification(type_name="my_tag")],
+    )
+
+    assert api_client.post.call_args.kwargs["data"] == [{"typeName": "my_tag"}]
+
+
+def test_add_entity_classifications_never_sends_read_only_fields(mocker):
+    """Test the entity guid and status Atlas reports are not echoed back in a request."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+
+    AtlasEntityClient(api_client).add_entity_classifications(
+        GUID,
+        [
+            AtlasClassification(
+                type_name="my_tag",
+                entity_guid=GUID,
+                entity_status="ACTIVE",
+            ),
+        ],
+    )
+
+    assert api_client.post.call_args.kwargs["data"] == [{"typeName": "my_tag"}]
+
+
+def test_add_entity_classifications_converts_validity_periods(mocker):
+    """Test validity period keys are camelCased, as Atlas expects."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+
+    AtlasEntityClient(api_client).add_entity_classifications(
+        GUID,
+        [
+            AtlasClassification(
+                type_name="my_tag",
+                validity_periods=[
+                    {
+                        "start_time": "2026/01/01 00:00:00",
+                        "end_time": "2026/12/31 00:00:00",
+                        "time_zone": "UTC",
+                    },
+                ],
+            ),
+        ],
+    )
+
+    assert api_client.post.call_args.kwargs["data"][0]["validityPeriods"] == [
+        {
+            "startTime": "2026/01/01 00:00:00",
+            "endTime": "2026/12/31 00:00:00",
+            "timeZone": "UTC",
+        },
+    ]
+
+
+def test_update_entity_classifications(mocker):
+    """Test classifications are updated with a PUT of a list to the same endpoint."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.put.return_value = None
+
+    result = AtlasEntityClient(api_client).update_entity_classifications(
+        GUID,
+        [AtlasClassification(type_name="my_tag", attributes={"levelOne": "low"})],
+    )
+
+    assert result is None
+    api_client.put.assert_called_once_with(
+        f"/api/atlas/v2/entity/guid/{GUID}/classifications",
+        data=[{"typeName": "my_tag", "attributes": {"levelOne": "low"}}],
+    )
+    api_client.post.assert_not_called()
+
+
+def test_remove_entity_classification(mocker):
+    """Test a classification is removed by name with a bodiless DELETE."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+
+    result = AtlasEntityClient(api_client).remove_entity_classification(
+        GUID,
+        "my_tag",
+    )
+
+    assert result is None
+    api_client.delete.assert_called_once_with(
+        f"/api/atlas/v2/entity/guid/{GUID}/classification/my_tag",
+    )
+
+
+def test_entity_classification_requests_quote_path_segments(mocker):
+    """Test the guid and name are quoted so they cannot alter the request path."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    client = AtlasEntityClient(api_client)
+
+    client.add_entity_classifications("a/b?c", [AtlasClassification(type_name="t")])
+    client.update_entity_classifications("a/b?c", [AtlasClassification(type_name="t")])
+    client.remove_entity_classification("a/b?c", "d/e")
+
+    assert api_client.post.call_args.args[0] == (
+        "/api/atlas/v2/entity/guid/a%2Fb%3Fc/classifications"
+    )
+    assert api_client.put.call_args.args[0] == (
+        "/api/atlas/v2/entity/guid/a%2Fb%3Fc/classifications"
+    )
+    assert api_client.delete.call_args.args[0] == (
+        "/api/atlas/v2/entity/guid/a%2Fb%3Fc/classification/d%2Fe"
+    )
+
+
+def test_normalize_attributes_names_the_owner_in_errors():
+    """Test the owner label and name appear in the errors, so each module's messages read naturally."""
+    with pytest.raises(ServicesError) as e:
+        normalize_attributes(
+            "Classification",
+            "my_tag",
+            [AtlasAttributeDef(name="levelOne", type_name="string")],
+            {"levelTwo": "x"},
+        )
+
+    assert "Classification 'my_tag'" in str(e.value)
+    assert "levelTwo" in str(e.value)
+    assert "levelOne" in str(e.value)
+
+
+def test_normalize_attributes_passes_complex_types_through():
+    """Test enum, map and struct values are not touched, because only Atlas can check them."""
+    defs = [
+        AtlasAttributeDef(name="kind", type_name="some_enum"),
+        AtlasAttributeDef(name="labels", type_name="map<string,string>"),
+        AtlasAttributeDef(name="detail", type_name="some_struct"),
+    ]
+    attributes = {
+        "kind": "HIGH",
+        "labels": {"a": "b"},
+        "detail": {"x": 1, "y": [1, 2]},
+    }
+
+    assert normalize_attributes("Classification", "my_tag", defs, attributes) == (
+        attributes
+    )
+
+
+def _typedef_client(mocker, defs):
+    typedef_client = mocker.create_autospec(AtlasTypeDefClient, instance=True)
+    typedef_client.get_classification_def_by_name.side_effect = defs.get
+    return typedef_client
+
+
+def test_classification_attribute_defs(mocker):
+    """Test the attributes of a classification and of all its super types are returned."""
+    typedef_client = _typedef_client(
+        mocker,
+        {
+            "child": AtlasClassificationDef(
+                name="child",
+                super_types=["parent"],
+                attribute_defs=[AtlasAttributeDef(name="own", type_name="string")],
+            ),
+            "parent": AtlasClassificationDef(
+                name="parent",
+                super_types=["grandparent"],
+                attribute_defs=[AtlasAttributeDef(name="inherited", type_name="int")],
+            ),
+            "grandparent": AtlasClassificationDef(
+                name="grandparent",
+                attribute_defs=[AtlasAttributeDef(name="deep", type_name="boolean")],
+            ),
+        },
+    )
+
+    result = classification_attribute_defs(typedef_client, "child")
+
+    assert result is not None
+    assert [d.name for d in result] == ["own", "inherited", "deep"]
+
+
+def test_classification_attribute_defs_without_attributes_or_super_types(mocker):
+    """Test a classification Atlas returns without attributeDefs or superTypes has none."""
+    typedef_client = _typedef_client(
+        mocker,
+        {"plain": AtlasClassificationDef(name="plain")},
+    )
+
+    assert classification_attribute_defs(typedef_client, "plain") == []
+
+
+def test_classification_attribute_defs_unknown_classification(mocker):
+    """Test a classification without a typedef returns None."""
+    assert classification_attribute_defs(_typedef_client(mocker, {}), "nope") is None
+
+
+def test_classification_attribute_defs_visits_each_type_once(mocker):
+    """Test a shared or circular super type does not repeat attributes or loop."""
+    typedef_client = _typedef_client(
+        mocker,
+        {
+            "a": AtlasClassificationDef(
+                name="a",
+                super_types=["b", "c"],
+                attribute_defs=[AtlasAttributeDef(name="x", type_name="string")],
+            ),
+            "b": AtlasClassificationDef(name="b", super_types=["c"]),
+            "c": AtlasClassificationDef(
+                name="c",
+                super_types=["a"],
+                attribute_defs=[AtlasAttributeDef(name="y", type_name="string")],
+            ),
+        },
+    )
+
+    result = classification_attribute_defs(typedef_client, "a")
+
+    assert result is not None
+    assert [d.name for d in result] == ["x", "y"]
+
+
+def test_classification_attribute_defs_ignores_missing_super_type(mocker):
+    """Test a super type Atlas cannot return does not hide the attributes found so far."""
+    typedef_client = _typedef_client(
+        mocker,
+        {
+            "child": AtlasClassificationDef(
+                name="child",
+                super_types=["gone"],
+                attribute_defs=[AtlasAttributeDef(name="own", type_name="string")],
+            ),
+        },
+    )
+
+    result = classification_attribute_defs(typedef_client, "child")
+
+    assert result is not None
+    assert [d.name for d in result] == ["own"]

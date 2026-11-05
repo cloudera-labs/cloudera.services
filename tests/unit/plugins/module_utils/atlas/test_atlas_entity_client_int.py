@@ -28,6 +28,7 @@ from ansible_collections.cloudera.services.plugins.module_utils.atlas import (
     AtlasBusinessMetadataDef,
 )
 from ansible_collections.cloudera.services.plugins.module_utils.atlas_entity import (
+    AtlasClassification,
     AtlasEntity,
 )
 from ansible_collections.cloudera.services.tests.unit import AnsibleFailJson
@@ -441,3 +442,247 @@ def test_remove_entity_business_metadata(
 
     assert result is None
     assert _business_attributes(atlas_entity_client, guid, name) is None
+
+
+def _classification(atlas_entity_client, guid, name):
+    entity = atlas_entity_client.get_entity_by_guid(guid)
+    assert entity is not None
+    # Atlas omits classifications once the last one is removed
+    classifications = (
+        entity.classifications if isinstance(entity.classifications, list) else []
+    )
+    return next((c for c in classifications if c.type_name == name), None)
+
+
+def test_add_entity_classifications(
+    atlas_entity_client,
+    atlas_entity_classification_def,
+    atlas_deletable_entity,
+):
+    """Test attaching a classification returns nothing, and Atlas stores it with its defaults."""
+    guid = str(atlas_deletable_entity.guid)
+    name = atlas_entity_classification_def.name
+
+    result = atlas_entity_client.add_entity_classifications(
+        guid,
+        [AtlasClassification(type_name=name, attributes={"level": "high", "rank": 2})],
+    )
+
+    assert result is None
+    attached = _classification(atlas_entity_client, guid, name)
+    assert attached is not None
+    assert attached.entity_guid == guid
+    assert attached.propagate is True
+    assert attached.remove_propagations_on_entity_delete is False
+    assert isinstance(attached.attributes, dict)
+    assert attached.attributes["level"] == "high"
+    assert attached.attributes["rank"] == 2
+
+
+def test_add_entity_classifications_with_flags(
+    atlas_entity_client,
+    atlas_entity_classification_def,
+    atlas_deletable_entity,
+):
+    """Test the propagation flags are stored as given."""
+    guid = str(atlas_deletable_entity.guid)
+    name = atlas_entity_classification_def.name
+
+    atlas_entity_client.add_entity_classifications(
+        guid,
+        [
+            AtlasClassification(
+                type_name=name,
+                propagate=False,
+                remove_propagations_on_entity_delete=True,
+            ),
+        ],
+    )
+
+    attached = _classification(atlas_entity_client, guid, name)
+    assert attached is not None
+    assert attached.propagate is False
+    assert attached.remove_propagations_on_entity_delete is True
+
+
+def test_add_entity_classifications_drops_unknown_attributes(
+    atlas_entity_client,
+    atlas_entity_classification_def,
+    atlas_deletable_entity,
+):
+    """Test Atlas silently drops an attribute the typedef lacks, which is why the module validates names."""
+    guid = str(atlas_deletable_entity.guid)
+    name = atlas_entity_classification_def.name
+
+    atlas_entity_client.add_entity_classifications(
+        guid,
+        [
+            AtlasClassification(
+                type_name=name,
+                attributes={"level": "high", "no_such_attribute": "x"},
+            ),
+        ],
+    )
+
+    attached = _classification(atlas_entity_client, guid, name)
+    assert attached is not None
+    assert isinstance(attached.attributes, dict)
+    assert attached.attributes["level"] == "high"
+    assert "no_such_attribute" not in attached.attributes
+
+
+def test_add_entity_classifications_twice_fails(
+    atlas_entity_client,
+    atlas_rest_client,
+    atlas_entity_classification_def,
+    atlas_deletable_entity,
+):
+    """Test attaching a classification that is already attached is an error (Atlas answers HTTP 400)."""
+    guid = str(atlas_deletable_entity.guid)
+    classification = AtlasClassification(type_name=atlas_entity_classification_def.name)
+    atlas_entity_client.add_entity_classifications(guid, [classification])
+
+    with pytest.raises(AnsibleFailJson):
+        atlas_entity_client.add_entity_classifications(guid, [classification])
+
+    assert atlas_rest_client.module.fail_json.call_args.kwargs["msg"]
+
+
+def test_add_entity_classifications_unknown_classification_fails(
+    atlas_entity_client,
+    atlas_rest_client,
+    atlas_deletable_entity,
+):
+    """Test attaching a classification that has no typedef is an error."""
+    with pytest.raises(AnsibleFailJson):
+        atlas_entity_client.add_entity_classifications(
+            str(atlas_deletable_entity.guid),
+            [AtlasClassification(type_name="ansible_test_no_such_classification")],
+        )
+
+    assert atlas_rest_client.module.fail_json.call_args.kwargs["msg"]
+
+
+def test_add_entity_classifications_unknown_entity_fails(
+    atlas_entity_client,
+    atlas_rest_client,
+    atlas_entity_classification_def,
+):
+    """Test attaching a classification to an unknown guid is an error."""
+    with pytest.raises(AnsibleFailJson):
+        atlas_entity_client.add_entity_classifications(
+            UNKNOWN_GUID,
+            [AtlasClassification(type_name=atlas_entity_classification_def.name)],
+        )
+
+    assert atlas_rest_client.module.fail_json.call_args.kwargs["msg"]
+
+
+def test_update_entity_classifications(
+    atlas_entity_client,
+    atlas_entity_classification_def,
+    atlas_deletable_entity,
+):
+    """Test updating a classification returns nothing and changes the attribute and the flags."""
+    guid = str(atlas_deletable_entity.guid)
+    name = atlas_entity_classification_def.name
+    atlas_entity_client.add_entity_classifications(
+        guid,
+        [AtlasClassification(type_name=name, attributes={"level": "low"})],
+    )
+
+    result = atlas_entity_client.update_entity_classifications(
+        guid,
+        [
+            AtlasClassification(
+                type_name=name,
+                attributes={"level": "high"},
+                propagate=False,
+                remove_propagations_on_entity_delete=True,
+            ),
+        ],
+    )
+
+    assert result is None
+    attached = _classification(atlas_entity_client, guid, name)
+    assert attached is not None
+    assert isinstance(attached.attributes, dict)
+    assert attached.attributes["level"] == "high"
+    assert attached.propagate is False
+    assert attached.remove_propagations_on_entity_delete is True
+
+
+def test_update_entity_classifications_merges_attributes(
+    atlas_entity_client,
+    atlas_entity_classification_def,
+    atlas_deletable_entity,
+):
+    """Test an update keeps the attributes it does not mention, so one cannot be cleared by leaving it out."""
+    guid = str(atlas_deletable_entity.guid)
+    name = atlas_entity_classification_def.name
+    atlas_entity_client.add_entity_classifications(
+        guid,
+        [AtlasClassification(type_name=name, attributes={"level": "low", "rank": 1})],
+    )
+
+    atlas_entity_client.update_entity_classifications(
+        guid,
+        [AtlasClassification(type_name=name, attributes={"rank": 2})],
+    )
+
+    attached = _classification(atlas_entity_client, guid, name)
+    assert attached is not None
+    assert isinstance(attached.attributes, dict)
+    assert attached.attributes["level"] == "low"
+    assert attached.attributes["rank"] == 2
+
+
+def test_update_entity_classifications_not_attached_fails(
+    atlas_entity_client,
+    atlas_rest_client,
+    atlas_entity_classification_def,
+    atlas_deletable_entity,
+):
+    """Test updating a classification that is not attached is an error (Atlas answers HTTP 400)."""
+    with pytest.raises(AnsibleFailJson):
+        atlas_entity_client.update_entity_classifications(
+            str(atlas_deletable_entity.guid),
+            [AtlasClassification(type_name=atlas_entity_classification_def.name)],
+        )
+
+    assert atlas_rest_client.module.fail_json.call_args.kwargs["msg"]
+
+
+def test_remove_entity_classification(
+    atlas_entity_client,
+    atlas_entity_classification_def,
+    atlas_deletable_entity,
+):
+    """Test removing a classification returns nothing and detaches it."""
+    guid = str(atlas_deletable_entity.guid)
+    name = atlas_entity_classification_def.name
+    atlas_entity_client.add_entity_classifications(
+        guid,
+        [AtlasClassification(type_name=name)],
+    )
+
+    result = atlas_entity_client.remove_entity_classification(guid, name)
+
+    assert result is None
+    assert _classification(atlas_entity_client, guid, name) is None
+
+
+def test_remove_entity_classification_not_attached_fails(
+    atlas_entity_client,
+    atlas_rest_client,
+    atlas_entity_classification_def,
+    atlas_deletable_entity,
+):
+    """Test removing a classification that is not attached is an error (Atlas answers HTTP 400)."""
+    with pytest.raises(AnsibleFailJson):
+        atlas_entity_client.remove_entity_classification(
+            str(atlas_deletable_entity.guid),
+            atlas_entity_classification_def.name,
+        )
+
+    assert atlas_rest_client.module.fail_json.call_args.kwargs["msg"]
