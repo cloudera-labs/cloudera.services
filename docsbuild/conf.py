@@ -35,6 +35,7 @@ intersphinx_mapping = {
         "https://docs.ansible.com/ansible/devel/",
         (None, "../ansible_devel.inv"),
     ),
+    "ansible": ("https://docs.ansible.com/projects/ansible/latest/", None),
     # If you want references to resolve to a released Ansible version (say, `5`), uncomment and replace X by this version:
     # 'ansibleX': ('https://docs.ansible.com/ansible/X/', (None, '../ansibleX.inv')),
 }
