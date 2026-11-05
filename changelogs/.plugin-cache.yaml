@@ -11,6 +11,56 @@ plugins:
   inventory: {}
   lookup: {}
   module:
+    atlas_business_metadata_def:
+      description: Manage business metadata type definitions in Apache Atlas
+      name: atlas_business_metadata_def
+      namespace: ''
+      version_added: 1.1.0
+    atlas_classification_def:
+      description: Manage classification type definitions in Apache Atlas
+      name: atlas_classification_def
+      namespace: ''
+      version_added: 1.1.0
+    atlas_entity_business_metadata:
+      description: Manage business metadata on an Apache Atlas entity
+      name: atlas_entity_business_metadata
+      namespace: ''
+      version_added: 1.1.0
+    atlas_entity_def:
+      description: Manage entity type definitions in Apache Atlas
+      name: atlas_entity_def
+      namespace: ''
+      version_added: 1.1.0
+    atlas_entity_info:
+      description: Retrieve an entity from Apache Atlas
+      name: atlas_entity_info
+      namespace: ''
+      version_added: 1.1.0
+    atlas_entity_label:
+      description: Manage the labels of an Apache Atlas entity
+      name: atlas_entity_label
+      namespace: ''
+      version_added: 1.1.0
+    atlas_enum_def:
+      description: Manage enum type definitions in Apache Atlas
+      name: atlas_enum_def
+      namespace: ''
+      version_added: 1.1.0
+    atlas_relationship_def:
+      description: Manage relationship type definitions in Apache Atlas
+      name: atlas_relationship_def
+      namespace: ''
+      version_added: 1.1.0
+    atlas_struct_def:
+      description: Manage struct type definitions in Apache Atlas
+      name: atlas_struct_def
+      namespace: ''
+      version_added: 1.1.0
+    atlas_typedef_info:
+      description: Retrieve type definitions from Apache Atlas
+      name: atlas_typedef_info
+      namespace: ''
+      version_added: 1.1.0
     ml_project:
       description: Create and delete Cloudera Machine Learning (CML) projects
       name: ml_project
@@ -131,6 +181,46 @@ plugins:
       name: ml_runtime_repo_info
       namespace: ''
       version_added: 1.0.0
+    ranger_policy:
+      description: Manage policies in Apache Ranger
+      name: ranger_policy
+      namespace: ''
+      version_added: 1.1.0
+    ranger_policy_info:
+      description: Retrieve policy details from Apache Ranger
+      name: ranger_policy_info
+      namespace: ''
+      version_added: 1.1.0
+    ranger_role:
+      description: Manage roles in Apache Ranger
+      name: ranger_role
+      namespace: ''
+      version_added: 1.1.0
+    ranger_role_info:
+      description: Retrieve role details from Apache Ranger
+      name: ranger_role_info
+      namespace: ''
+      version_added: 1.1.0
+    ranger_service:
+      description: Manage services in Apache Ranger
+      name: ranger_service
+      namespace: ''
+      version_added: 1.1.0
+    ranger_service_info:
+      description: Retrieve service details from Apache Ranger
+      name: ranger_service_info
+      namespace: ''
+      version_added: 1.1.0
+    smm_kafka_topic:
+      description: Manage Kafka topics in Streams Messaging Manager
+      name: smm_kafka_topic
+      namespace: ''
+      version_added: 1.1.0
+    smm_kafka_topic_info:
+      description: Retrieve Kafka topic details from Streams Messaging Manager
+      name: smm_kafka_topic_info
+      namespace: ''
+      version_added: 1.1.0
     ssb_data_source:
       description: Manage SSB project data sources
       name: ssb_data_source
@@ -211,4 +301,4 @@ plugins:
   strategy: {}
   test: {}
   vars: {}
-version: 1.0.0
+version: 1.1.0

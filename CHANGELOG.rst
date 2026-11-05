@@ -4,6 +4,60 @@ cloudera.services Release Notes
 
 .. contents:: Topics
 
+v1.1.0
+======
+
+Minor Changes
+-------------
+
+- Add Atlas module utilities, fixtures, and atlas_enum_def and atlas_typedef_info modules (https://github.com/cloudera-labs/cloudera.services/pull/20)
+- Add Ranger Policy modules (https://github.com/cloudera-labs/cloudera.services/pull/17)
+- Add Ranger Role modules (https://github.com/cloudera-labs/cloudera.services/pull/18)
+- Add Ranger policy and role modules to action groups (https://github.com/cloudera-labs/cloudera.services/pull/26)
+- Add Ranger service modules (https://github.com/cloudera-labs/cloudera.services/pull/15)
+- Add SSB action groups (https://github.com/cloudera-labs/cloudera.services/pull/27)
+- Add atlas_business_metadata_def module and unit and integration tests (https://github.com/cloudera-labs/cloudera.services/pull/25)
+- Add atlas_classification_def module (https://github.com/cloudera-labs/cloudera.services/pull/21)
+- Add atlas_entity_business_metadata module and unit and integration tests (https://github.com/cloudera-labs/cloudera.services/pull/42)
+- Add atlas_entity_def module and unit and integration tests (https://github.com/cloudera-labs/cloudera.services/pull/22)
+- Add atlas_entity_info module and unit and integration tests (https://github.com/cloudera-labs/cloudera.services/pull/36)
+- Add atlas_entity_label module and unit and integration tests (https://github.com/cloudera-labs/cloudera.services/pull/39)
+- Add atlas_relationship_def module and unit and integration tests (https://github.com/cloudera-labs/cloudera.services/pull/24)
+- Add atlas_struct_def module and unit and integration tests (https://github.com/cloudera-labs/cloudera.services/pull/23)
+- Add integration tests for Atlas entity label module utility functions (https://github.com/cloudera-labs/cloudera.services/pull/43)
+- Add smm_kafka_topic modules (https://github.com/cloudera-labs/cloudera.services/pull/37)
+- Consolidate Atlas TypeDef module utilities (https://github.com/cloudera-labs/cloudera.services/pull/32)
+- Consolidate Atlas TypeDef testing utilities (https://github.com/cloudera-labs/cloudera.services/pull/33)
+- Refactor Atlas EnumDef and ClassificationDef bundle extraction (https://github.com/cloudera-labs/cloudera.services/pull/31)
+- Update Atlas documentation for consolidated TypeDef functions and test utilities (https://github.com/cloudera-labs/cloudera.services/pull/34)
+- Update ML action groups (https://github.com/cloudera-labs/cloudera.services/pull/28)
+- Update ServicesClient data parameter annotations (https://github.com/cloudera-labs/cloudera.services/pull/35)
+- Update environment payload handling in ML project (https://github.com/cloudera-labs/cloudera.services/pull/19)
+- Update replica and ISR descriptions to use RV notation in smm_kafka_topic  modules (https://github.com/cloudera-labs/cloudera.services/pull/38)
+- Update ssb_job module with 'wait' parameter (https://github.com/cloudera-labs/cloudera.services/pull/40)
+
+New Modules
+-----------
+
+- cloudera.services.atlas_business_metadata_def - Manage business metadata type definitions in Apache Atlas.
+- cloudera.services.atlas_classification_def - Manage classification type definitions in Apache Atlas.
+- cloudera.services.atlas_entity_business_metadata - Manage business metadata on an Apache Atlas entity.
+- cloudera.services.atlas_entity_def - Manage entity type definitions in Apache Atlas.
+- cloudera.services.atlas_entity_info - Retrieve an entity from Apache Atlas.
+- cloudera.services.atlas_entity_label - Manage the labels of an Apache Atlas entity.
+- cloudera.services.atlas_enum_def - Manage enum type definitions in Apache Atlas.
+- cloudera.services.atlas_relationship_def - Manage relationship type definitions in Apache Atlas.
+- cloudera.services.atlas_struct_def - Manage struct type definitions in Apache Atlas.
+- cloudera.services.atlas_typedef_info - Retrieve type definitions from Apache Atlas.
+- cloudera.services.ranger_policy - Manage policies in Apache Ranger.
+- cloudera.services.ranger_policy_info - Retrieve policy details from Apache Ranger.
+- cloudera.services.ranger_role - Manage roles in Apache Ranger.
+- cloudera.services.ranger_role_info - Retrieve role details from Apache Ranger.
+- cloudera.services.ranger_service - Manage services in Apache Ranger.
+- cloudera.services.ranger_service_info - Retrieve service details from Apache Ranger.
+- cloudera.services.smm_kafka_topic - Manage Kafka topics in Streams Messaging Manager.
+- cloudera.services.smm_kafka_topic_info - Retrieve Kafka topic details from Streams Messaging Manager.
+
 v1.0.0
 ======
 
