@@ -39,7 +39,7 @@ extra-dependencies = [
   "pytest",
   "pytest-mock",
   "ansible-lint",
-  "antsibull-docs >= 2.0.0, < 3.0.0",
+  # "antsibull-docs >= 2.0.0, < 3.0.0",
   "kafka-python >=2.3.0",
 ]
 
