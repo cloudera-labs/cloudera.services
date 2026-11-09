@@ -135,7 +135,7 @@ class AtlasGlossaryClient:
 
         if not isinstance(result, list):
             raise ServicesError(
-                "Atlas returned an unexpected response for the glossaries"
+                "Atlas returned an unexpected response for the glossaries",
             )
 
         return [_glossary_from_response(item) for item in result]

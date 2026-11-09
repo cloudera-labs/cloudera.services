@@ -100,7 +100,8 @@ def test_atlas_glossary_info_module_by_guid_not_found(module_args, mocker):
 def test_atlas_glossary_info_module_by_name_returns_every_match(module_args, mocker):
     """Test a name that several glossaries carry returns all of them."""
     mock_find = mocker.patch(
-        f"{CLIENT}.find_glossaries", return_value=[GLOSSARY, OTHER]
+        f"{CLIENT}.find_glossaries",
+        return_value=[GLOSSARY, OTHER],
     )
 
     module_args(_args(name="Bank"))
@@ -144,7 +145,8 @@ def test_atlas_glossary_info_module_lists_every_glossary_without_criteria(
 ):
     """Test no criteria returns all glossaries."""
     mock_find = mocker.patch(
-        f"{CLIENT}.find_glossaries", return_value=[GLOSSARY, OTHER]
+        f"{CLIENT}.find_glossaries",
+        return_value=[GLOSSARY, OTHER],
     )
 
     module_args(_args())
@@ -190,7 +192,9 @@ def test_atlas_glossary_info_module_check_mode(module_args, mocker):
     ids=["guid-and-name", "guid-and-qualified-name"],
 )
 def test_atlas_glossary_info_module_ambiguous_identity_fails(
-    module_args, mocker, extra
+    module_args,
+    mocker,
+    extra,
 ):
     """Test a guid together with another criterion fails before any Atlas call is made."""
     mock_get = mocker.patch(f"{CLIENT}.get_glossary")
