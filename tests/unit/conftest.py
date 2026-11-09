@@ -77,6 +77,10 @@ from ansible_collections.cloudera.services.plugins.module_utils.atlas_entity imp
     AtlasEntity,
     AtlasEntityClient,
 )
+from ansible_collections.cloudera.services.plugins.module_utils.atlas_glossary import (
+    AtlasGlossary,
+    AtlasGlossaryClient,
+)
 from ansible_collections.cloudera.services.plugins.module_utils.ranger import (
     RangerPolicy,
     RangerPolicyClient,
@@ -2525,6 +2529,12 @@ def atlas_entity_type(
             super_types=["Referenceable"],
             attribute_defs=[
                 AtlasAttributeDef(name="note", type_name="string", is_optional=True),
+                AtlasAttributeDef(name="count", type_name="int", is_optional=True),
+                AtlasAttributeDef(
+                    name="tags",
+                    type_name="array<string>",
+                    is_optional=True,
+                ),
             ],
         ),
     )
@@ -2596,6 +2606,77 @@ def atlas_deletable_entity(
     atlas_purge_entity(str(entity.guid))
 
     yield entity
+
+
+@pytest.fixture(scope="module")
+def atlas_glossary_client(atlas_rest_client) -> AtlasGlossaryClient:
+    """Fixture to create an AtlasGlossaryClient instance."""
+    return AtlasGlossaryClient(api_client=atlas_rest_client)
+
+
+@pytest.fixture
+def atlas_glossary_name() -> str:
+    """A glossary name no glossary has (letters, digits and underscores only)."""
+    return f"ansible_test_glossary_{uuid.uuid4().hex[:8]}"
+
+
+@pytest.fixture
+def atlas_cleanup_glossary(
+    atlas_glossary_client,
+) -> Generator[Callable[[str], str], None, None]:
+    """
+    Factory fixture to register the guid of a glossary a test creates, so teardown
+    deletes it (and its terms and categories). A refusal only warns.
+    """
+    guids: List[str] = []
+
+    def _register(guid: str) -> str:
+        guids.append(guid)
+        return guid
+
+    yield _register
+
+    for guid in guids:
+        try:
+            atlas_glossary_client.delete_glossary(guid)
+        except Exception as e:
+            warnings.warn(
+                f"Failed to delete glossary {guid} during cleanup: {str(e)}",
+                RuntimeWarning,
+            )
+
+
+@pytest.fixture
+def atlas_deletable_glossary(
+    request,
+    atlas_glossary_client,
+) -> Generator[AtlasGlossary, None, None]:
+    """
+    Fixture to create a function-scoped test glossary that can be modified or deleted.
+
+    Atlas deletes glossaries for good (no purge) and takes every term and category
+    along, so teardown is a single delete. A refusal, such as a term still assigned to
+    an entity, only warns. Request it before `atlas_deletable_entity` so an entity that
+    a test assigns a term to is removed before the glossary.
+    """
+    name = f"{_atlas_type_name('deletable', request.node.name)}_{uuid.uuid4().hex[:8]}"
+
+    glossary = atlas_glossary_client.create_glossary(
+        AtlasGlossary(
+            name=name,
+            short_description="Deletable glossary created by pytest - safe to delete",
+        ),
+    )
+
+    yield glossary
+
+    try:
+        atlas_glossary_client.delete_glossary(str(glossary.guid))
+    except Exception as e:
+        warnings.warn(
+            f"Failed to delete glossary {glossary.guid} during cleanup: {str(e)}",
+            RuntimeWarning,
+        )
 
 
 @pytest.fixture
