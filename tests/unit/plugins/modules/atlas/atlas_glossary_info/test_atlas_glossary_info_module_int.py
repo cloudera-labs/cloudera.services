@@ -61,7 +61,8 @@ def atlas_module_args(module_args, env_context):
 
 
 def test_atlas_glossary_info_module_by_guid(
-    atlas_module_args, atlas_deletable_glossary
+    atlas_module_args,
+    atlas_deletable_glossary,
 ):
     """Test a guid lookup returns the glossary."""
     atlas_module_args({"guid": atlas_deletable_glossary.guid})
@@ -78,7 +79,8 @@ def test_atlas_glossary_info_module_by_guid(
 
 
 def test_atlas_glossary_info_module_by_name(
-    atlas_module_args, atlas_deletable_glossary
+    atlas_module_args,
+    atlas_deletable_glossary,
 ):
     """Test a name lookup returns the glossary."""
     atlas_module_args({"name": atlas_deletable_glossary.name})

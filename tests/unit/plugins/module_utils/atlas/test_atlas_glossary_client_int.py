@@ -135,7 +135,7 @@ def test_list_glossaries(atlas_glossary_client, atlas_deletable_glossary):
 def test_find_glossaries_by_name(atlas_glossary_client, atlas_deletable_glossary):
     """Test a name lookup finds the glossary."""
     found = atlas_glossary_client.find_glossaries(
-        name=str(atlas_deletable_glossary.name)
+        name=str(atlas_deletable_glossary.name),
     )
 
     assert [g.guid for g in found] == [atlas_deletable_glossary.guid]
