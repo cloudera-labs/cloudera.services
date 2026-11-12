@@ -220,7 +220,7 @@ def test_atlas_glossary_module_update(
 ):
     """Test a changed description is updated in place."""
     atlas_module_args(
-        {"name": atlas_deletable_glossary.name, "long_description": "new"}
+        {"name": atlas_deletable_glossary.name, "long_description": "new"},
     )
 
     with pytest.raises(AnsibleExitJson) as e:

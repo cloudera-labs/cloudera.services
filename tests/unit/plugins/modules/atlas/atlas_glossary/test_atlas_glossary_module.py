@@ -366,7 +366,11 @@ def test_atlas_glossary_module_diff_covers_the_managed_fields_only(module_args, 
     client["get_glossary"].return_value = updated
 
     result = _run(
-        module_args, name="Bank", language="x", usage="u2", _ansible_diff=True
+        module_args,
+        name="Bank",
+        language="x",
+        usage="u2",
+        _ansible_diff=True,
     )
 
     assert result["diff"] == {
@@ -376,7 +380,8 @@ def test_atlas_glossary_module_diff_covers_the_managed_fields_only(module_args, 
 
 
 def test_atlas_glossary_module_diff_of_a_create_has_an_empty_before(
-    module_args, client
+    module_args,
+    client,
 ):
     """Test a create diff has nothing before."""
     client["find_glossaries"].return_value = []
@@ -512,7 +517,8 @@ def test_atlas_glossary_module_absent_ignores_a_deleted_assignment(module_args, 
 
 
 def test_atlas_glossary_module_absent_fails_if_the_glossary_remains(
-    module_args, client
+    module_args,
+    client,
 ):
     """Test a glossary that is still there after the delete is reported."""
     client["find_glossaries"].return_value = [EXISTING]
@@ -726,7 +732,7 @@ def test_atlas_glossary_module_forbidden_fails(module_args, mocker):
             ("GET", "/api/atlas/v2/glossary?limit=-1"): (
                 403,
                 {"errorMessage": "Forbidden"},
-            )
+            ),
         },
     )
 

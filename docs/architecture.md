@@ -86,13 +86,15 @@ Entity instances (the objects typedefs describe, such as a `hive_table`) use a s
 
 ## Apache Atlas Glossary
 
-Glossaries, categories and terms use their own client, `AtlasGlossaryClient` in `plugins/module_utils/atlas_glossary.py` (REST base `/api/atlas/v2/glossary`), with one module per resource. The client grows with the modules; so far it covers glossaries (`atlas_glossary_info`).
+Glossaries, categories and terms use their own client, `AtlasGlossaryClient` in `plugins/module_utils/atlas_glossary.py` (REST base `/api/atlas/v2/glossary`), with one module per resource. The client grows with the modules; so far it covers glossaries (`atlas_glossary_info`, `atlas_glossary`).
 
 - **Field names:** the models use `name`, not the `displayName` of older Atlas documentation. Only `qualifiedName` is unique, so a name can match several glossaries; the info module returns every match and a module that manages a glossary must fail on ambiguity
 - **Responses omit empty fields:** null fields and empty `terms`/`categories` sets are absent from a GET, not `[]`. `terms` and `categories` on a glossary are headers (`AtlasRelatedTermHeader`, `AtlasRelatedCategoryHeader`), not full objects
 - **Verbatim maps:** `additionalAttributes` is user data; pass `GLOSSARY_VERBATIM_VALUES` as `verbatim_values` to the case-conversion helpers, with `verbatim_keys=()` and `verbatim_map_keys=()` as the entity client does
 - **Lookups:** a glossary is looked up by guid (a 404 is squelched to `None`) or found by listing, `GET /v2/glossary?limit=-1`, and filtering client-side. Deletes are hard (no `DELETED` status and nothing to purge), so a deleted glossary is simply unknown and its name can be used again
 - **Delete:** `DELETE` removes the glossary together with every term and category in it, and Atlas refuses (HTTP 400, `ATLAS-400-00-084`) while any term is assigned to an entity. Unlike an entity delete, an unknown guid is a 404, which the client squelches
+- **Updates are partial:** `partial_update_glossary()` PUTs only the changed fields to `/{guid}/partial` (`name`, `short_description`, `long_description`, `language`, `usage`; an empty string clears one). The full `PUT /{guid}` is deliberately not offered, because it deletes every field the body omits. The qualified name is immutable, so a rename changes `name` only and a glossary that is renamed is identified by `guid` or `qualified_name`
+- **`atlas_glossary` identity and delete guard:** identity is `guid`, `qualified_name`, or `name` (several glossaries can share a name, so ambiguity fails). `state=absent` refuses a glossary that holds terms or categories unless `cascade` is set, and always refuses while a term is assigned to an entity: it reads the terms with `list_terms()` (`GET /{guid}/terms` carries `assignedEntities`; a `DELETED` relationship does not count) and fails before the DELETE. Check mode predicts the same refusals. Failures are raised as `ServicesError`, which `ServicesModule.execute()` turns into `fail_json`
 
 ## State Management
 
