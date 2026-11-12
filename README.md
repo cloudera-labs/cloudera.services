@@ -20,7 +20,7 @@
   * Look up entities, such as Hive tables, by GUID or qualified name
   * Add and remove entity labels, business metadata, and classifications
   * Create, update, and delete entities of custom types
-  * Look up glossaries, with the terms and categories they contain
+  * Create, update, delete, and look up glossaries, with the terms and categories they contain
 
 and more!
 
