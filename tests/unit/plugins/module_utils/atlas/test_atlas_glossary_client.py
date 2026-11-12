@@ -27,8 +27,11 @@ from ansible_collections.cloudera.services.plugins.module_utils.common import (
 from ansible_collections.cloudera.services.plugins.module_utils.atlas_glossary import (
     AtlasGlossary,
     AtlasGlossaryClient,
+    AtlasGlossaryTerm,
     AtlasRelatedCategoryHeader,
+    AtlasRelatedObjectId,
     AtlasRelatedTermHeader,
+    validate_glossary_name,
 )
 
 GUID = "4b4117f6-dd77-419d-9b8d-b120891ff2b4"
@@ -322,3 +325,163 @@ def test_delete_glossary_quotes_the_path_segment(mocker):
     AtlasGlossaryClient(api_client).delete_glossary("a/b c")
 
     assert api_client.delete.call_args.args[0] == "/api/atlas/v2/glossary/a%2Fb%20c"
+
+
+def test_partial_update_glossary(mocker):
+    """Test only the given fields are PUT, in camelCase, and the glossary is returned."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.put.return_value = GLOSSARY_RESPONSE
+
+    result = AtlasGlossaryClient(api_client).partial_update_glossary(
+        GUID,
+        {"short_description": "short", "name": "Bank", "language": ""},
+    )
+
+    assert result == EXPECTED_GLOSSARY
+    api_client.put.assert_called_once_with(
+        f"/api/atlas/v2/glossary/{GUID}/partial",
+        data={"shortDescription": "short", "name": "Bank", "language": ""},
+    )
+
+
+def test_partial_update_glossary_without_changes_fails(mocker):
+    """Test an empty update is refused here, since Atlas answers it with HTTP 400."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+
+    with pytest.raises(ServicesError, match="at least one"):
+        AtlasGlossaryClient(api_client).partial_update_glossary(GUID, {})
+
+    api_client.put.assert_not_called()
+
+
+def test_partial_update_glossary_quotes_the_path_segment(mocker):
+    """Test a guid with reserved characters cannot change the request path."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.put.return_value = GLOSSARY_RESPONSE
+
+    AtlasGlossaryClient(api_client).partial_update_glossary("a/b c", {"usage": "u"})
+
+    assert (
+        api_client.put.call_args.args[0] == "/api/atlas/v2/glossary/a%2Fb%20c/partial"
+    )
+
+
+@pytest.mark.parametrize("body", MALFORMED_GLOSSARIES, ids=MALFORMED_IDS)
+def test_partial_update_glossary_rejects_malformed_responses(mocker, body):
+    """Test an update response without the glossary becomes a ServicesError."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.put.return_value = body
+
+    with pytest.raises(ServicesError, match="unexpected"):
+        AtlasGlossaryClient(api_client).partial_update_glossary(GUID, {"usage": "u"})
+
+
+TERMS_RESPONSE = [
+    {
+        "guid": TERM_GUID,
+        "qualifiedName": "Account@bank_qn",
+        "name": "Account",
+        "anchor": {"glossaryGuid": GUID, "relationGuid": "r1"},
+        "assignedEntities": [
+            {
+                "guid": "e1",
+                "typeName": "hive_table",
+                "entityStatus": "ACTIVE",
+                "displayText": "sales",
+                "relationshipType": "AtlasGlossarySemanticAssignment",
+                "relationshipGuid": "rel1",
+                "relationshipStatus": "ACTIVE",
+                "relationshipAttributes": {"typeName": "x", "attributes": {}},
+                "qualifiedName": "default.sales@c1",
+            },
+        ],
+    },
+    {"guid": "t2", "qualifiedName": "Loan@bank_qn", "name": "Loan"},
+]
+
+EXPECTED_TERMS = [
+    AtlasGlossaryTerm(
+        name="Account",
+        guid=TERM_GUID,
+        qualified_name="Account@bank_qn",
+        assigned_entities=[
+            AtlasRelatedObjectId(
+                guid="e1",
+                type_name="hive_table",
+                entity_status="ACTIVE",
+                display_text="sales",
+                relationship_type="AtlasGlossarySemanticAssignment",
+                relationship_guid="rel1",
+                relationship_status="ACTIVE",
+                qualified_name="default.sales@c1",
+            ),
+        ],
+    ),
+    AtlasGlossaryTerm(name="Loan", guid="t2", qualified_name="Loan@bank_qn"),
+]
+
+
+def test_list_terms(mocker):
+    """Test the terms of a glossary map onto AtlasGlossaryTerm with their assignments."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.get.return_value = TERMS_RESPONSE
+
+    result = AtlasGlossaryClient(api_client).list_terms(GUID)
+
+    assert result == EXPECTED_TERMS
+    api_client.get.assert_called_once_with(
+        f"/api/atlas/v2/glossary/{GUID}/terms",
+        params={"limit": "-1"},
+    )
+
+
+@pytest.mark.parametrize("empty", [[], None], ids=["empty-list", "no-content"])
+def test_list_terms_without_terms(mocker, empty):
+    """Test a glossary without terms gives an empty list."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.get.return_value = empty
+
+    assert AtlasGlossaryClient(api_client).list_terms(GUID) == []
+
+
+def test_list_terms_quotes_the_path_segment(mocker):
+    """Test a guid with reserved characters cannot change the request path."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.get.return_value = []
+
+    AtlasGlossaryClient(api_client).list_terms("a/b c")
+
+    assert api_client.get.call_args.args[0] == "/api/atlas/v2/glossary/a%2Fb%20c/terms"
+
+
+@pytest.mark.parametrize(
+    "body",
+    ["not json", {"guid": TERM_GUID}, [TERMS_RESPONSE[0], "oops"], [{"name": "x"}]],
+    ids=["string", "dict", "non-dict-item", "item-without-guid"],
+)
+def test_list_terms_rejects_malformed_responses(mocker, body):
+    """Test an unexpected listing body becomes a ServicesError."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.get.return_value = body
+
+    with pytest.raises(ServicesError, match="unexpected"):
+        AtlasGlossaryClient(api_client).list_terms(GUID)
+
+
+@pytest.mark.parametrize("name", ["Bank", "Retail banking", "Café", "a_b-c"])
+def test_validate_glossary_name_accepts(name):
+    """Test names Atlas accepts, spaces and accents included, pass."""
+    validate_glossary_name("glossary", name)
+
+
+@pytest.mark.parametrize("character", ["@", ".", "<", ">"])
+def test_validate_glossary_name_rejects_reserved_characters(character):
+    """Test a name Atlas would reject (ATLAS-400-00-083) fails before any request."""
+    with pytest.raises(ServicesError, match="may not contain"):
+        validate_glossary_name("glossary", f"a{character}b")
+
+
+def test_validate_glossary_name_rejects_an_empty_name():
+    """Test an empty name fails."""
+    with pytest.raises(ServicesError, match="empty"):
+        validate_glossary_name("glossary", "")
