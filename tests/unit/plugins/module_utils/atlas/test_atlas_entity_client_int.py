@@ -30,6 +30,7 @@ from ansible_collections.cloudera.services.plugins.module_utils.atlas import (
 from ansible_collections.cloudera.services.plugins.module_utils.atlas_entity import (
     AtlasClassification,
     AtlasEntity,
+    entity_attribute_defs,
 )
 from ansible_collections.cloudera.services.tests.unit import AnsibleFailJson
 
@@ -686,3 +687,94 @@ def test_remove_entity_classification_not_attached_fails(
         )
 
     assert atlas_rest_client.module.fail_json.call_args.kwargs["msg"]
+
+
+def test_update_entity_by_unique_attributes_is_partial(
+    atlas_entity_client,
+    atlas_entity_type,
+    atlas_deletable_entity,
+):
+    """Test a partial update changes only the attributes given."""
+    qualified_name = atlas_deletable_entity.attributes["qualifiedName"]
+
+    atlas_entity_client.update_entity_by_unique_attributes(
+        atlas_entity_type.name,
+        {"qualifiedName": qualified_name},
+        AtlasEntity(type_name=atlas_entity_type.name, attributes={"count": 3}),
+    )
+
+    entity = atlas_entity_client.get_entity_by_guid(str(atlas_deletable_entity.guid))
+    assert entity is not None
+    assert entity.status == "ACTIVE"
+    assert entity.attributes["count"] == 3
+    assert entity.attributes["note"] == atlas_deletable_entity.attributes["note"]
+    assert entity.attributes["qualifiedName"] == qualified_name
+
+
+def test_update_entity_by_unique_attributes_sets_custom_attributes(
+    atlas_entity_client,
+    atlas_entity_type,
+    atlas_deletable_entity,
+):
+    """Test custom attributes are set by a partial update, and the attributes are left alone."""
+    qualified_name = atlas_deletable_entity.attributes["qualifiedName"]
+
+    atlas_entity_client.update_entity_by_unique_attributes(
+        atlas_entity_type.name,
+        {"qualifiedName": qualified_name},
+        AtlasEntity(
+            type_name=atlas_entity_type.name,
+            custom_attributes={"first": "1", "second": "2"},
+        ),
+    )
+
+    entity = atlas_entity_client.get_entity_by_guid(str(atlas_deletable_entity.guid))
+    assert entity is not None
+    assert entity.custom_attributes == {"first": "1", "second": "2"}
+    assert entity.attributes["note"] == atlas_deletable_entity.attributes["note"]
+
+
+def test_update_entity_by_unique_attributes_unknown_entity_fails(
+    atlas_rest_client,
+    atlas_entity_client,
+    atlas_entity_type,
+):
+    """Test updating an entity that does not exist fails."""
+    with pytest.raises(AnsibleFailJson):
+        atlas_entity_client.update_entity_by_unique_attributes(
+            atlas_entity_type.name,
+            {"qualifiedName": f"ansible_test_missing_{uuid.uuid4().hex}"},
+            AtlasEntity(type_name=atlas_entity_type.name, attributes={"count": 1}),
+        )
+
+
+def test_delete_entity_by_guid_returns_the_deleted_guids(
+    atlas_entity_client,
+    atlas_deletable_entity,
+):
+    """Test a delete reports the guid it deleted, and a repeat delete reports none."""
+    guid = str(atlas_deletable_entity.guid)
+
+    assert atlas_entity_client.delete_entity_by_guid(guid) == [guid]
+    assert atlas_entity_client.delete_entity_by_guid(guid) == []
+
+
+def test_delete_entity_by_guid_unknown_guid_returns_no_guids(atlas_entity_client):
+    """Test the silent HTTP 200 Atlas gives for an unknown guid returns an empty list."""
+    assert atlas_entity_client.delete_entity_by_guid(UNKNOWN_GUID) == []
+
+
+def test_entity_attribute_defs(atlas_typedef_client, atlas_entity_type):
+    """Test the attributes of the type include the ones inherited from Referenceable."""
+    attribute_defs = entity_attribute_defs(atlas_typedef_client, atlas_entity_type.name)
+
+    assert attribute_defs is not None
+    names = {attribute_def.name for attribute_def in attribute_defs}
+    assert {"note", "count", "tags", "qualifiedName"} <= names
+
+
+def test_entity_attribute_defs_unknown_type(atlas_typedef_client):
+    """Test a type without a typedef returns None."""
+    assert (
+        entity_attribute_defs(atlas_typedef_client, "ansible_test_no_such_type") is None
+    )
