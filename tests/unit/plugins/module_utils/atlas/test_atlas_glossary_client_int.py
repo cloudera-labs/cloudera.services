@@ -23,6 +23,8 @@ import pytest
 from ansible_collections.cloudera.services.plugins.module_utils.atlas_glossary import (
     GLOSSARY_API,
     AtlasGlossary,
+    AtlasGlossaryCategory,
+    AtlasGlossaryHeader,
 )
 from ansible_collections.cloudera.services.plugins.module_utils.common import NULLABLE
 from ansible_collections.cloudera.services.tests.unit import AnsibleFailJson
@@ -275,3 +277,125 @@ def test_list_terms(
 
     assert [(t.guid, t.name) for t in terms] == [(term["guid"], atlas_glossary_name)]
     assert terms[0].assigned_entities in (NULLABLE, None, [])
+
+
+def test_create_category(atlas_glossary_client, atlas_deletable_glossary):
+    """Test a category is created under its glossary and returned as Atlas stored it."""
+    category = atlas_glossary_client.create_category(
+        AtlasGlossaryCategory(
+            name="Customer",
+            short_description="short",
+            anchor=AtlasGlossaryHeader(glossary_guid=atlas_deletable_glossary.guid),
+        ),
+    )
+
+    assert isinstance(category, AtlasGlossaryCategory)
+    assert category.guid
+    assert category.name == "Customer"
+    assert category.short_description == "short"
+    assert isinstance(category.anchor, AtlasGlossaryHeader)
+    assert category.anchor.glossary_guid == atlas_deletable_glossary.guid
+    assert category.parent_category is NULLABLE
+
+
+def test_create_category_below_a_parent(
+    atlas_glossary_client,
+    atlas_glossary_category_tree,
+):
+    """Test a child category reports its parent, and the parent lists the child."""
+    _, parent, child = atlas_glossary_category_tree
+
+    assert child.parent_category.category_guid == parent.guid
+
+    refreshed = atlas_glossary_client.get_category(str(parent.guid))
+    assert [c.category_guid for c in refreshed.children_categories] == [child.guid]
+
+
+def test_get_category(atlas_glossary_client, atlas_glossary_category_tree):
+    """Test a category is read back by guid, hierarchy included."""
+    glossary, parent, child = atlas_glossary_category_tree
+
+    category = atlas_glossary_client.get_category(str(child.guid))
+
+    assert category.name == "Child"
+    assert category.anchor.glossary_guid == glossary.guid
+    assert category.parent_category.category_guid == parent.guid
+
+
+def test_get_category_unknown_guid(atlas_glossary_client):
+    """Test an unknown category guid returns None."""
+    assert atlas_glossary_client.get_category(UNKNOWN_GUID) is None
+
+
+def test_list_category_headers(atlas_glossary_client, atlas_glossary_category_tree):
+    """Test the headers carry each category's current name and parent guid."""
+    glossary, parent, child = atlas_glossary_category_tree
+
+    headers = {
+        h.category_guid: h
+        for h in atlas_glossary_client.list_category_headers(str(glossary.guid))
+    }
+
+    assert headers[parent.guid].display_text == "Parent"
+    assert headers[child.guid].display_text == "Child"
+    assert headers[child.guid].parent_category_guid == parent.guid
+
+
+def test_list_category_headers_of_an_empty_glossary(
+    atlas_glossary_client,
+    atlas_deletable_glossary,
+):
+    """Test a glossary without categories lists none."""
+    assert (
+        atlas_glossary_client.list_category_headers(str(atlas_deletable_glossary.guid))
+        == []
+    )
+
+
+def test_find_categories_by_name(atlas_glossary_client, atlas_glossary_category_tree):
+    """Test a name finds the category in its glossary."""
+    glossary, _, child = atlas_glossary_category_tree
+
+    found = atlas_glossary_client.find_categories(str(glossary.guid), name="Child")
+
+    assert [c.guid for c in found] == [child.guid]
+
+
+def test_find_categories_returns_every_category_without_a_name(
+    atlas_glossary_client,
+    atlas_glossary_category_tree,
+):
+    """Test no name returns the whole glossary."""
+    glossary, parent, child = atlas_glossary_category_tree
+
+    found = atlas_glossary_client.find_categories(str(glossary.guid))
+
+    assert {c.guid for c in found} == {parent.guid, child.guid}
+
+
+def test_find_categories_returns_same_name_under_two_parents(
+    atlas_glossary_client,
+    atlas_glossary_category_tree,
+):
+    """Test a name shared by categories under different parents matches both."""
+    glossary, _, child = atlas_glossary_category_tree
+    twin = atlas_glossary_client.create_category(
+        AtlasGlossaryCategory(
+            name="Child",
+            anchor=AtlasGlossaryHeader(glossary_guid=glossary.guid),
+        ),
+    )
+
+    found = atlas_glossary_client.find_categories(str(glossary.guid), name="Child")
+
+    assert {c.guid for c in found} == {child.guid, twin.guid}
+
+
+def test_find_categories_without_a_match(
+    atlas_glossary_client,
+    atlas_glossary_category_tree,
+):
+    """Test an unknown name returns an empty list."""
+    glossary, _, _ = atlas_glossary_category_tree
+
+    assert atlas_glossary_client.find_categories(str(glossary.guid), name="Nope") == []
