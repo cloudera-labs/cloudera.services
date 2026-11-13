@@ -1,0 +1,401 @@
+# -*- coding: utf-8 -*-
+
+# Copyright 2026 Cloudera, Inc. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from __future__ import absolute_import, division, print_function
+
+__metaclass__ = type
+
+import pytest
+
+from ansible_collections.cloudera.services.plugins.module_utils.atlas_glossary import (
+    GLOSSARY_API,
+    AtlasGlossary,
+    AtlasGlossaryCategory,
+    AtlasGlossaryHeader,
+)
+from ansible_collections.cloudera.services.plugins.module_utils.common import NULLABLE
+from ansible_collections.cloudera.services.tests.unit import AnsibleFailJson
+
+REQUIRED_ENV_VARS = [
+    "ATLAS_API_URL",
+    "ATLAS_API_USERNAME",
+    "ATLAS_API_PASSWORD",
+]
+
+UNKNOWN_GUID = "00000000-0000-0000-0000-000000000000"
+
+
+def test_create_glossary(
+    atlas_glossary_client,
+    atlas_cleanup_glossary,
+    atlas_glossary_name,
+):
+    """Test creating a glossary returns it as Atlas stored it, qualified name derived."""
+    glossary = atlas_glossary_client.create_glossary(
+        AtlasGlossary(name=atlas_glossary_name),
+    )
+    atlas_cleanup_glossary(str(glossary.guid))
+
+    assert isinstance(glossary, AtlasGlossary)
+    assert glossary.guid
+    assert glossary.name == atlas_glossary_name
+    assert glossary.qualified_name == atlas_glossary_name
+
+
+def test_create_glossary_with_attributes(
+    atlas_glossary_client,
+    atlas_cleanup_glossary,
+    atlas_glossary_name,
+):
+    """Test an explicit qualified name and the descriptive fields are stored."""
+    glossary = atlas_glossary_client.create_glossary(
+        AtlasGlossary(
+            name=atlas_glossary_name,
+            qualified_name=f"{atlas_glossary_name}_qn",
+            short_description="short",
+            long_description="long",
+            language="English",
+            usage="testing",
+        ),
+    )
+    atlas_cleanup_glossary(str(glossary.guid))
+
+    assert glossary.qualified_name == f"{atlas_glossary_name}_qn"
+    assert glossary.short_description == "short"
+    assert glossary.long_description == "long"
+    assert glossary.language == "English"
+    assert glossary.usage == "testing"
+
+
+def test_create_glossary_with_the_name_of_an_existing_one_fails(
+    atlas_rest_client,
+    atlas_glossary_client,
+    atlas_deletable_glossary,
+):
+    """Test a second glossary with the same qualified name is refused."""
+    # The real client turns the HTTP 409 into a fail_json call; the fixture's mock
+    # raises AnsibleFailJson and keeps Atlas's message in the call arguments.
+    with pytest.raises(AnsibleFailJson):
+        atlas_glossary_client.create_glossary(
+            AtlasGlossary(name=str(atlas_deletable_glossary.name)),
+        )
+
+    assert (
+        "already exists" in atlas_rest_client.module.fail_json.call_args.kwargs["msg"]
+    )
+
+
+@pytest.mark.parametrize("character", ["@", ".", "<", ">"])
+def test_create_glossary_with_a_reserved_character_fails(
+    atlas_rest_client,
+    atlas_glossary_client,
+    atlas_glossary_name,
+    character,
+):
+    """Test a name containing @ . < > is refused, and nothing is created."""
+    name = f"{atlas_glossary_name}{character}x"
+
+    with pytest.raises(AnsibleFailJson):
+        atlas_glossary_client.create_glossary(AtlasGlossary(name=name))
+
+    assert "special chars" in atlas_rest_client.module.fail_json.call_args.kwargs["msg"]
+    assert atlas_glossary_client.find_glossaries(name=name) == []
+
+
+def test_get_glossary(atlas_glossary_client, atlas_deletable_glossary):
+    """Test a guid lookup returns the glossary."""
+    glossary = atlas_glossary_client.get_glossary(str(atlas_deletable_glossary.guid))
+
+    assert glossary is not None
+    assert glossary.guid == atlas_deletable_glossary.guid
+    assert glossary.name == atlas_deletable_glossary.name
+
+
+def test_get_glossary_unknown_guid(atlas_glossary_client):
+    """Test an unknown guid returns None."""
+    assert atlas_glossary_client.get_glossary(UNKNOWN_GUID) is None
+
+
+def test_list_glossaries(atlas_glossary_client, atlas_deletable_glossary):
+    """Test the listing includes a glossary that was just created."""
+    guids = [g.guid for g in atlas_glossary_client.list_glossaries()]
+
+    assert atlas_deletable_glossary.guid in guids
+
+
+def test_find_glossaries_by_name(atlas_glossary_client, atlas_deletable_glossary):
+    """Test a name lookup finds the glossary."""
+    found = atlas_glossary_client.find_glossaries(
+        name=str(atlas_deletable_glossary.name),
+    )
+
+    assert [g.guid for g in found] == [atlas_deletable_glossary.guid]
+
+
+def test_find_glossaries_by_qualified_name(
+    atlas_glossary_client,
+    atlas_deletable_glossary,
+):
+    """Test a qualified name lookup finds the glossary."""
+    found = atlas_glossary_client.find_glossaries(
+        qualified_name=str(atlas_deletable_glossary.qualified_name),
+    )
+
+    assert [g.guid for g in found] == [atlas_deletable_glossary.guid]
+
+
+def test_find_glossaries_without_a_match(atlas_glossary_client, atlas_glossary_name):
+    """Test a name nothing carries returns an empty list."""
+    assert atlas_glossary_client.find_glossaries(name=atlas_glossary_name) == []
+
+
+def test_delete_glossary(atlas_glossary_client, atlas_deletable_glossary):
+    """Test a deleted glossary is gone for good: not found by guid, not listed."""
+    atlas_glossary_client.delete_glossary(str(atlas_deletable_glossary.guid))
+
+    assert (
+        atlas_glossary_client.get_glossary(str(atlas_deletable_glossary.guid)) is None
+    )
+    assert atlas_deletable_glossary.guid not in [
+        g.guid for g in atlas_glossary_client.list_glossaries()
+    ]
+
+
+def test_delete_glossary_unknown_guid(atlas_glossary_client):
+    """Test deleting a glossary that does not exist is not an error."""
+    atlas_glossary_client.delete_glossary(UNKNOWN_GUID)
+
+
+def test_create_glossary_again_after_delete(
+    atlas_glossary_client,
+    atlas_cleanup_glossary,
+    atlas_deletable_glossary,
+):
+    """Test the name of a deleted glossary can be used again, with a new guid."""
+    atlas_glossary_client.delete_glossary(str(atlas_deletable_glossary.guid))
+
+    again = atlas_glossary_client.create_glossary(
+        AtlasGlossary(name=str(atlas_deletable_glossary.name)),
+    )
+    atlas_cleanup_glossary(str(again.guid))
+
+    assert again.guid != atlas_deletable_glossary.guid
+    assert again.name == atlas_deletable_glossary.name
+
+
+def test_partial_update_glossary(atlas_glossary_client, atlas_deletable_glossary):
+    """Test the given fields change and the others stay, qualified name included."""
+    updated = atlas_glossary_client.partial_update_glossary(
+        str(atlas_deletable_glossary.guid),
+        {"long_description": "long", "language": "French", "usage": "testing"},
+    )
+
+    assert updated.long_description == "long"
+    assert updated.language == "French"
+    assert updated.usage == "testing"
+    assert updated.short_description == atlas_deletable_glossary.short_description
+    assert updated.qualified_name == atlas_deletable_glossary.qualified_name
+
+
+def test_partial_update_glossary_renames_and_keeps_the_qualified_name(
+    atlas_glossary_client,
+    atlas_deletable_glossary,
+    atlas_glossary_name,
+):
+    """Test a rename changes the name only; the qualified name is immutable."""
+    updated = atlas_glossary_client.partial_update_glossary(
+        str(atlas_deletable_glossary.guid),
+        {"name": atlas_glossary_name},
+    )
+
+    assert updated.name == atlas_glossary_name
+    assert updated.qualified_name == atlas_deletable_glossary.qualified_name
+
+
+def test_partial_update_glossary_with_an_empty_string_clears_the_field(
+    atlas_glossary_client,
+    atlas_deletable_glossary,
+):
+    """Test an empty string removes a field that holds a value."""
+    updated = atlas_glossary_client.partial_update_glossary(
+        str(atlas_deletable_glossary.guid),
+        {"short_description": ""},
+    )
+
+    assert updated.short_description in (NULLABLE, None, "")
+
+
+def test_partial_update_glossary_unknown_guid_fails(
+    atlas_rest_client,
+    atlas_glossary_client,
+):
+    """Test updating a glossary that does not exist fails with Atlas's message."""
+    with pytest.raises(AnsibleFailJson):
+        atlas_glossary_client.partial_update_glossary(UNKNOWN_GUID, {"usage": "u"})
+
+    assert atlas_rest_client.module.fail_json.call_args.kwargs["msg"]
+
+
+def test_list_terms_of_an_empty_glossary(
+    atlas_glossary_client,
+    atlas_deletable_glossary,
+):
+    """Test a glossary without terms lists none."""
+    assert atlas_glossary_client.list_terms(str(atlas_deletable_glossary.guid)) == []
+
+
+def test_list_terms(
+    atlas_rest_client,
+    atlas_glossary_client,
+    atlas_deletable_glossary,
+    atlas_glossary_name,
+):
+    """Test a term of the glossary is listed with its name and guid."""
+    # Set up through the REST API, since the client has no term methods yet.
+    term = atlas_rest_client.post(
+        f"{GLOSSARY_API}/term",
+        data={
+            "name": atlas_glossary_name,
+            "anchor": {"glossaryGuid": atlas_deletable_glossary.guid},
+        },
+    )
+
+    terms = atlas_glossary_client.list_terms(str(atlas_deletable_glossary.guid))
+
+    assert [(t.guid, t.name) for t in terms] == [(term["guid"], atlas_glossary_name)]
+    assert terms[0].assigned_entities in (NULLABLE, None, [])
+
+
+def test_create_category(atlas_glossary_client, atlas_deletable_glossary):
+    """Test a category is created under its glossary and returned as Atlas stored it."""
+    category = atlas_glossary_client.create_category(
+        AtlasGlossaryCategory(
+            name="Customer",
+            short_description="short",
+            anchor=AtlasGlossaryHeader(glossary_guid=atlas_deletable_glossary.guid),
+        ),
+    )
+
+    assert isinstance(category, AtlasGlossaryCategory)
+    assert category.guid
+    assert category.name == "Customer"
+    assert category.short_description == "short"
+    assert isinstance(category.anchor, AtlasGlossaryHeader)
+    assert category.anchor.glossary_guid == atlas_deletable_glossary.guid
+    assert category.parent_category is NULLABLE
+
+
+def test_create_category_below_a_parent(
+    atlas_glossary_client,
+    atlas_glossary_category_tree,
+):
+    """Test a child category reports its parent, and the parent lists the child."""
+    _, parent, child = atlas_glossary_category_tree
+
+    assert child.parent_category.category_guid == parent.guid
+
+    refreshed = atlas_glossary_client.get_category(str(parent.guid))
+    assert [c.category_guid for c in refreshed.children_categories] == [child.guid]
+
+
+def test_get_category(atlas_glossary_client, atlas_glossary_category_tree):
+    """Test a category is read back by guid, hierarchy included."""
+    glossary, parent, child = atlas_glossary_category_tree
+
+    category = atlas_glossary_client.get_category(str(child.guid))
+
+    assert category.name == "Child"
+    assert category.anchor.glossary_guid == glossary.guid
+    assert category.parent_category.category_guid == parent.guid
+
+
+def test_get_category_unknown_guid(atlas_glossary_client):
+    """Test an unknown category guid returns None."""
+    assert atlas_glossary_client.get_category(UNKNOWN_GUID) is None
+
+
+def test_list_category_headers(atlas_glossary_client, atlas_glossary_category_tree):
+    """Test the headers carry each category's current name and parent guid."""
+    glossary, parent, child = atlas_glossary_category_tree
+
+    headers = {
+        h.category_guid: h
+        for h in atlas_glossary_client.list_category_headers(str(glossary.guid))
+    }
+
+    assert headers[parent.guid].display_text == "Parent"
+    assert headers[child.guid].display_text == "Child"
+    assert headers[child.guid].parent_category_guid == parent.guid
+
+
+def test_list_category_headers_of_an_empty_glossary(
+    atlas_glossary_client,
+    atlas_deletable_glossary,
+):
+    """Test a glossary without categories lists none."""
+    assert (
+        atlas_glossary_client.list_category_headers(str(atlas_deletable_glossary.guid))
+        == []
+    )
+
+
+def test_find_categories_by_name(atlas_glossary_client, atlas_glossary_category_tree):
+    """Test a name finds the category in its glossary."""
+    glossary, _, child = atlas_glossary_category_tree
+
+    found = atlas_glossary_client.find_categories(str(glossary.guid), name="Child")
+
+    assert [c.guid for c in found] == [child.guid]
+
+
+def test_find_categories_returns_every_category_without_a_name(
+    atlas_glossary_client,
+    atlas_glossary_category_tree,
+):
+    """Test no name returns the whole glossary."""
+    glossary, parent, child = atlas_glossary_category_tree
+
+    found = atlas_glossary_client.find_categories(str(glossary.guid))
+
+    assert {c.guid for c in found} == {parent.guid, child.guid}
+
+
+def test_find_categories_returns_same_name_under_two_parents(
+    atlas_glossary_client,
+    atlas_glossary_category_tree,
+):
+    """Test a name shared by categories under different parents matches both."""
+    glossary, _, child = atlas_glossary_category_tree
+    twin = atlas_glossary_client.create_category(
+        AtlasGlossaryCategory(
+            name="Child",
+            anchor=AtlasGlossaryHeader(glossary_guid=glossary.guid),
+        ),
+    )
+
+    found = atlas_glossary_client.find_categories(str(glossary.guid), name="Child")
+
+    assert {c.guid for c in found} == {child.guid, twin.guid}
+
+
+def test_find_categories_without_a_match(
+    atlas_glossary_client,
+    atlas_glossary_category_tree,
+):
+    """Test an unknown name returns an empty list."""
+    glossary, _, _ = atlas_glossary_category_tree
+
+    assert atlas_glossary_client.find_categories(str(glossary.guid), name="Nope") == []
