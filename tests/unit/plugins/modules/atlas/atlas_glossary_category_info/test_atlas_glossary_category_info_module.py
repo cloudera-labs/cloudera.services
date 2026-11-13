@@ -50,7 +50,8 @@ CATEGORY = AtlasGlossaryCategory(
     additional_attributes={"someCamel": {"innerKey": 1}},
     anchor=AtlasGlossaryHeader(glossary_guid=GLOSSARY_GUID, display_text="Bank"),
     parent_category=AtlasRelatedCategoryHeader(
-        category_guid="p1", display_text="Party"
+        category_guid="p1",
+        display_text="Party",
     ),
     children_categories=[
         AtlasRelatedCategoryHeader(category_guid="c1", display_text="Retail"),
