@@ -26,7 +26,9 @@ from ansible_collections.cloudera.services.plugins.module_utils.common import (
 )
 from ansible_collections.cloudera.services.plugins.module_utils.atlas_glossary import (
     AtlasGlossary,
+    AtlasGlossaryCategory,
     AtlasGlossaryClient,
+    AtlasGlossaryHeader,
     AtlasGlossaryTerm,
     AtlasRelatedCategoryHeader,
     AtlasRelatedObjectId,
@@ -97,6 +99,76 @@ SECOND_RESPONSE = {
 }
 
 EXPECTED_SECOND = AtlasGlossary(name="Bank", guid=OTHER_GUID, qualified_name="Bank")
+
+PARENT_GUID = "ac37096b-6021-402d-8a65-7f3538615d27"
+CHILD_GUID = "d1f3a1d0-6a6e-4a6d-9a16-5b0c3c1f7a11"
+
+# Shaped after a real Atlas 2.4 category response: empty sets and null fields are omitted.
+CATEGORY_RESPONSE = {
+    "guid": CATEGORY_GUID,
+    "qualifiedName": "Customer@bank_qn",
+    "name": "Customer",
+    "shortDescription": "short",
+    "additionalAttributes": {"someKey": "someValue"},
+    "anchor": {
+        "glossaryGuid": GUID,
+        "relationGuid": "e4a1f6c0-3a58-4f7e-8d7b-0e5b3a9c1d22",
+        "displayText": "Bank",
+    },
+    "parentCategory": {
+        "categoryGuid": PARENT_GUID,
+        "relationGuid": "b6c2d1aa-7b0f-4b1e-9e55-2d6f9d6d8f33",
+        "displayText": "Party",
+    },
+    "childrenCategories": [
+        {
+            "categoryGuid": CHILD_GUID,
+            "parentCategoryGuid": CATEGORY_GUID,
+            "relationGuid": "c7d3e2bb-8c10-4c2f-8f66-3e7a0e7e9a44",
+            "displayText": "Retail",
+        },
+    ],
+    "terms": [
+        {
+            "termGuid": TERM_GUID,
+            "relationGuid": "0c437486-2b95-451f-9e5a-2fe337b4a721",
+            "displayText": "Account",
+        },
+    ],
+}
+
+EXPECTED_CATEGORY = AtlasGlossaryCategory(
+    name="Customer",
+    guid=CATEGORY_GUID,
+    qualified_name="Customer@bank_qn",
+    short_description="short",
+    additional_attributes={"someKey": "someValue"},
+    anchor=AtlasGlossaryHeader(
+        glossary_guid=GUID,
+        relation_guid="e4a1f6c0-3a58-4f7e-8d7b-0e5b3a9c1d22",
+        display_text="Bank",
+    ),
+    parent_category=AtlasRelatedCategoryHeader(
+        category_guid=PARENT_GUID,
+        relation_guid="b6c2d1aa-7b0f-4b1e-9e55-2d6f9d6d8f33",
+        display_text="Party",
+    ),
+    children_categories=[
+        AtlasRelatedCategoryHeader(
+            category_guid=CHILD_GUID,
+            parent_category_guid=CATEGORY_GUID,
+            relation_guid="c7d3e2bb-8c10-4c2f-8f66-3e7a0e7e9a44",
+            display_text="Retail",
+        ),
+    ],
+    terms=[
+        AtlasRelatedTermHeader(
+            term_guid=TERM_GUID,
+            relation_guid="0c437486-2b95-451f-9e5a-2fe337b4a721",
+            display_text="Account",
+        ),
+    ],
+)
 
 MALFORMED_GLOSSARIES = [
     [],
@@ -466,6 +538,236 @@ def test_list_terms_rejects_malformed_responses(mocker, body):
 
     with pytest.raises(ServicesError, match="unexpected"):
         AtlasGlossaryClient(api_client).list_terms(GUID)
+
+
+def test_get_category(mocker):
+    """Test a category response maps onto AtlasGlossaryCategory, hierarchy included."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.get.return_value = CATEGORY_RESPONSE
+
+    assert AtlasGlossaryClient(api_client).get_category(CATEGORY_GUID) == (
+        EXPECTED_CATEGORY
+    )
+
+    api_client.get.assert_called_once_with(
+        f"/api/atlas/v2/glossary/category/{CATEGORY_GUID}",
+        squelch={404: None},
+    )
+
+
+def test_get_category_not_found(mocker):
+    """Test an unknown (or deleted) category guid returns None."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.get.return_value = None
+
+    assert AtlasGlossaryClient(api_client).get_category(CATEGORY_GUID) is None
+
+
+def test_get_category_quotes_the_path_segment(mocker):
+    """Test a guid cannot escape its path segment."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.get.return_value = None
+
+    AtlasGlossaryClient(api_client).get_category("a/b")
+
+    api_client.get.assert_called_once_with(
+        "/api/atlas/v2/glossary/category/a%2Fb",
+        squelch={404: None},
+    )
+
+
+@pytest.mark.parametrize("body", MALFORMED_GLOSSARIES, ids=MALFORMED_IDS)
+def test_get_category_rejects_malformed_responses(mocker, body):
+    """Test an unexpected category body becomes a ServicesError, not a TypeError."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.get.return_value = body
+
+    with pytest.raises(ServicesError, match="unexpected"):
+        AtlasGlossaryClient(api_client).get_category(CATEGORY_GUID)
+
+
+def test_list_category_headers(mocker):
+    """Test the category headers of a glossary map onto AtlasRelatedCategoryHeader."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.get.return_value = [
+        {
+            "categoryGuid": CATEGORY_GUID,
+            "parentCategoryGuid": PARENT_GUID,
+            "displayText": "Customer",
+        },
+        {"categoryGuid": PARENT_GUID, "displayText": "Party"},
+    ]
+
+    result = AtlasGlossaryClient(api_client).list_category_headers(GUID)
+
+    assert result == [
+        AtlasRelatedCategoryHeader(
+            category_guid=CATEGORY_GUID,
+            parent_category_guid=PARENT_GUID,
+            display_text="Customer",
+        ),
+        AtlasRelatedCategoryHeader(category_guid=PARENT_GUID, display_text="Party"),
+    ]
+    api_client.get.assert_called_once_with(
+        f"/api/atlas/v2/glossary/{GUID}/categories/headers",
+        params={"limit": "-1"},
+    )
+
+
+@pytest.mark.parametrize("empty", [[], None], ids=["empty-list", "no-content"])
+def test_list_category_headers_without_categories(mocker, empty):
+    """Test an empty (or contentless) headers listing is an empty list."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.get.return_value = empty
+
+    assert AtlasGlossaryClient(api_client).list_category_headers(GUID) == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    ["not json", {"categoryGuid": CATEGORY_GUID}, ["oops"], [{"displayText": "x"}]],
+    ids=["string", "dict", "non-dict-item", "item-without-guid"],
+)
+def test_list_category_headers_rejects_malformed_responses(mocker, body):
+    """Test an unexpected headers body becomes a ServicesError, not a TypeError."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.get.return_value = body
+
+    with pytest.raises(ServicesError, match="unexpected"):
+        AtlasGlossaryClient(api_client).list_category_headers(GUID)
+
+
+def test_list_category_headers_quotes_the_path_segment(mocker):
+    """Test a glossary guid cannot escape its path segment."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.get.return_value = []
+
+    AtlasGlossaryClient(api_client).list_category_headers("a/b")
+
+    api_client.get.assert_called_once_with(
+        "/api/atlas/v2/glossary/a%2Fb/categories/headers",
+        params={"limit": "-1"},
+    )
+
+
+def _category_api(mocker, headers, categories):
+    """Build a mocked API: the headers listing, then one full response per guid."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+
+    def get(path, **kwargs):
+        if path.endswith("/categories/headers"):
+            return headers
+        return categories.get(path.rsplit("/", 1)[1])
+
+    api_client.get.side_effect = get
+    return api_client
+
+
+def test_find_categories_by_name_fetches_every_match(mocker):
+    """Test a name matches the current name in the headers, duplicates included."""
+    other = dict(CATEGORY_RESPONSE, guid=OTHER_GUID)
+    api_client = _category_api(
+        mocker,
+        headers=[
+            {"categoryGuid": CATEGORY_GUID, "displayText": "Customer"},
+            {"categoryGuid": PARENT_GUID, "displayText": "Party"},
+            {"categoryGuid": OTHER_GUID, "displayText": "Customer"},
+        ],
+        categories={CATEGORY_GUID: CATEGORY_RESPONSE, OTHER_GUID: other},
+    )
+
+    result = AtlasGlossaryClient(api_client).find_categories(GUID, name="Customer")
+
+    assert [category.guid for category in result] == [CATEGORY_GUID, OTHER_GUID]
+    assert result[0] == EXPECTED_CATEGORY
+
+
+def test_find_categories_without_a_name_lists_everything(mocker):
+    """Test a missing name returns every category of the glossary."""
+    other = dict(CATEGORY_RESPONSE, guid=OTHER_GUID, name="Party")
+    api_client = _category_api(
+        mocker,
+        headers=[
+            {"categoryGuid": CATEGORY_GUID, "displayText": "Customer"},
+            {"categoryGuid": OTHER_GUID, "displayText": "Party"},
+        ],
+        categories={CATEGORY_GUID: CATEGORY_RESPONSE, OTHER_GUID: other},
+    )
+
+    result = AtlasGlossaryClient(api_client).find_categories(GUID)
+
+    assert [category.name for category in result] == ["Customer", "Party"]
+
+
+def test_find_categories_without_a_match(mocker):
+    """Test an unknown name returns an empty list and fetches nothing."""
+    api_client = _category_api(
+        mocker,
+        headers=[{"categoryGuid": CATEGORY_GUID, "displayText": "Customer"}],
+        categories={CATEGORY_GUID: CATEGORY_RESPONSE},
+    )
+
+    assert AtlasGlossaryClient(api_client).find_categories(GUID, name="Nope") == []
+    api_client.get.assert_called_once()
+
+
+def test_find_categories_skips_a_category_deleted_after_the_listing(mocker):
+    """Test a category that vanishes between the headers and the fetch is skipped."""
+    api_client = _category_api(
+        mocker,
+        headers=[
+            {"categoryGuid": CATEGORY_GUID, "displayText": "Customer"},
+            {"categoryGuid": OTHER_GUID, "displayText": "Customer"},
+        ],
+        categories={CATEGORY_GUID: CATEGORY_RESPONSE},
+    )
+
+    result = AtlasGlossaryClient(api_client).find_categories(GUID, name="Customer")
+
+    assert [category.guid for category in result] == [CATEGORY_GUID]
+
+
+def test_create_category(mocker):
+    """Test a category is created under its glossary (and parent) and returned as stored."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.post.return_value = CATEGORY_RESPONSE
+
+    result = AtlasGlossaryClient(api_client).create_category(
+        AtlasGlossaryCategory(
+            name="Customer",
+            short_description="short",
+            additional_attributes={"someKey": "someValue"},
+            anchor=AtlasGlossaryHeader(glossary_guid=GUID),
+            parent_category=AtlasRelatedCategoryHeader(category_guid=PARENT_GUID),
+        ),
+    )
+
+    assert result == EXPECTED_CATEGORY
+    api_client.post.assert_called_once_with(
+        "/api/atlas/v2/glossary/category",
+        data={
+            "name": "Customer",
+            "shortDescription": "short",
+            "additionalAttributes": {"someKey": "someValue"},
+            "anchor": {"glossaryGuid": GUID},
+            "parentCategory": {"categoryGuid": PARENT_GUID},
+        },
+    )
+
+
+@pytest.mark.parametrize("body", MALFORMED_GLOSSARIES, ids=MALFORMED_IDS)
+def test_create_category_rejects_malformed_responses(mocker, body):
+    """Test an unexpected create response becomes a ServicesError."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.post.return_value = body
+
+    with pytest.raises(ServicesError, match="unexpected"):
+        AtlasGlossaryClient(api_client).create_category(
+            AtlasGlossaryCategory(
+                name="Customer",
+                anchor=AtlasGlossaryHeader(glossary_guid=GUID),
+            ),
+        )
 
 
 @pytest.mark.parametrize("name", ["Bank", "Retail banking", "Café", "a_b-c"])

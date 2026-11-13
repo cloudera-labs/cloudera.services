@@ -91,6 +91,36 @@ class AtlasGlossary:
 
 
 @dataclass
+class AtlasGlossaryHeader:
+    """Reference to the glossary a category or term is anchored to."""
+
+    glossary_guid: Union[str, None, NULLABLE] = NULLABLE
+    relation_guid: Union[str, None, NULLABLE] = NULLABLE
+    display_text: Union[str, None, NULLABLE] = NULLABLE
+
+
+@dataclass
+class AtlasGlossaryCategory:
+    """Representation of an Apache Atlas glossary category."""
+
+    name: str
+
+    qualified_name: Union[str, None, NULLABLE] = NULLABLE
+    short_description: Union[str, None, NULLABLE] = NULLABLE
+    long_description: Union[str, None, NULLABLE] = NULLABLE
+    additional_attributes: Union[Dict[str, Any], None, NULLABLE] = NULLABLE
+
+    # Read-only (set by Atlas)
+    guid: Union[str, None, NULLABLE] = NULLABLE
+    anchor: Union[AtlasGlossaryHeader, None, NULLABLE] = NULLABLE
+    parent_category: Union[AtlasRelatedCategoryHeader, None, NULLABLE] = NULLABLE
+    children_categories: Union[List[AtlasRelatedCategoryHeader], None, NULLABLE] = (
+        NULLABLE
+    )
+    terms: Union[List[AtlasRelatedTermHeader], None, NULLABLE] = NULLABLE
+
+
+@dataclass
 class AtlasRelatedObjectId:
     """Reference to an entity a term is assigned to, with the assignment relationship."""
 
@@ -129,6 +159,16 @@ def validate_glossary_name(kind: str, name: str) -> None:
         )
 
 
+def _require_identity(raw: Any, kind: str) -> None:
+    """Raise ServicesError unless an Atlas response is an object with a guid and a name."""
+    if (
+        not isinstance(raw, dict)
+        or not isinstance(raw.get("guid"), str)
+        or not isinstance(raw.get("name"), str)
+    ):
+        raise ServicesError(f"Atlas returned an unexpected response for the {kind}")
+
+
 def _glossary_to_payload(glossary: AtlasGlossary) -> Dict[str, Any]:
     """Serialise an AtlasGlossary into the camelCase body of an Atlas glossary request."""
     return camel_preserving_options(
@@ -139,14 +179,19 @@ def _glossary_to_payload(glossary: AtlasGlossary) -> Dict[str, Any]:
     )
 
 
+def _category_to_payload(category: AtlasGlossaryCategory) -> Dict[str, Any]:
+    """Serialise an AtlasGlossaryCategory into the camelCase body of an Atlas category request."""
+    return camel_preserving_options(
+        to_dict(category),
+        verbatim_keys=(),
+        verbatim_map_keys=(),
+        verbatim_values=GLOSSARY_VERBATIM_VALUES,
+    )
+
+
 def _glossary_from_response(raw: Any) -> AtlasGlossary:
     """Deserialise an Atlas glossary response into an AtlasGlossary."""
-    if (
-        not isinstance(raw, dict)
-        or not isinstance(raw.get("guid"), str)
-        or not isinstance(raw.get("name"), str)
-    ):
-        raise ServicesError("Atlas returned an unexpected response for the glossary")
+    _require_identity(raw, "glossary")
 
     return from_dict(
         AtlasGlossary,
@@ -159,14 +204,24 @@ def _glossary_from_response(raw: Any) -> AtlasGlossary:
     )
 
 
+def _category_from_response(raw: Any) -> AtlasGlossaryCategory:
+    """Deserialise an Atlas glossary category response into an AtlasGlossaryCategory."""
+    _require_identity(raw, "category")
+
+    return from_dict(
+        AtlasGlossaryCategory,
+        snake_preserving_options(
+            raw,
+            verbatim_keys=(),
+            verbatim_map_keys=(),
+            verbatim_values=GLOSSARY_VERBATIM_VALUES,
+        ),
+    )
+
+
 def _term_from_response(raw: Any) -> AtlasGlossaryTerm:
     """Deserialise an Atlas glossary term response into an AtlasGlossaryTerm."""
-    if (
-        not isinstance(raw, dict)
-        or not isinstance(raw.get("guid"), str)
-        or not isinstance(raw.get("name"), str)
-    ):
-        raise ServicesError("Atlas returned an unexpected response for the term")
+    _require_identity(raw, "term")
 
     return from_dict(
         AtlasGlossaryTerm,
@@ -177,6 +232,33 @@ def _term_from_response(raw: Any) -> AtlasGlossaryTerm:
             verbatim_values=GLOSSARY_VERBATIM_VALUES,
         ),
     )
+
+
+def resolve_glossary(
+    client: "AtlasGlossaryClient",
+    name: Optional[str] = None,
+    qualified_name: Optional[str] = None,
+    guid: Optional[str] = None,
+) -> AtlasGlossary:
+    """Return the one glossary that matches, or raise ServicesError."""
+    if guid:
+        glossary = client.get_glossary(guid)
+        if glossary is None:
+            raise ServicesError(f"No glossary with guid '{guid}' exists.")
+        return glossary
+
+    matches = client.find_glossaries(name=name, qualified_name=qualified_name)
+
+    if not matches:
+        raise ServicesError(f"No glossary named '{name or qualified_name}' exists.")
+
+    if len(matches) > 1:
+        raise ServicesError(
+            f"More than one glossary is named '{name}'; "
+            "identify it with glossary_guid or glossary_qualified_name.",
+        )
+
+    return matches[0]
 
 
 class AtlasGlossaryClient:
@@ -282,6 +364,80 @@ class AtlasGlossaryClient:
             raise ServicesError("Atlas returned an unexpected response for the terms")
 
         return [_term_from_response(item) for item in result]
+
+    def list_category_headers(
+        self,
+        glossary_guid: str,
+    ) -> List[AtlasRelatedCategoryHeader]:
+        """List the headers (guid, current name, parent guid) of a glossary's categories."""
+        result = self.api_client.get(
+            f"{GLOSSARY_API}/{quote(glossary_guid, safe='')}/categories/headers",
+            params={"limit": "-1"},
+        )
+
+        if result is None:
+            return []
+
+        if not isinstance(result, list):
+            raise ServicesError(
+                "Atlas returned an unexpected response for the category headers",
+            )
+
+        for item in result:
+            if not isinstance(item, dict) or not isinstance(
+                item.get("categoryGuid"),
+                str,
+            ):
+                raise ServicesError(
+                    "Atlas returned an unexpected response for the category headers",
+                )
+
+        return [
+            from_dict(AtlasRelatedCategoryHeader, snake_preserving_options(item))
+            for item in result
+        ]
+
+    def find_categories(
+        self,
+        glossary_guid: str,
+        name: Optional[str] = None,
+    ) -> List[AtlasGlossaryCategory]:
+        """
+        Find the categories of a glossary whose name equals the given name.
+
+        Matches on the name field (the headers' display text), never the qualified
+        name, which Atlas leaves stale after a re-parent. A name can match several
+        categories under different parents. Left as None, every category matches.
+        """
+        categories = []
+        for header in self.list_category_headers(glossary_guid):
+            if name is not None and header.display_text != name:
+                continue
+            category = self.get_category(str(header.category_guid))
+            if category is not None:
+                categories.append(category)
+        return categories
+
+    def create_category(self, category: AtlasGlossaryCategory) -> AtlasGlossaryCategory:
+        """Create a category in the glossary named by its anchor and return it as stored."""
+        result = self.api_client.post(
+            f"{GLOSSARY_API}/category",
+            data=_category_to_payload(category),
+        )
+
+        return _category_from_response(result)
+
+    def get_category(self, guid: str) -> Optional[AtlasGlossaryCategory]:
+        """Retrieve a category by guid, or None if the guid is unknown."""
+        result = self.api_client.get(
+            f"{GLOSSARY_API}/category/{quote(guid, safe='')}",
+            squelch={404: None},
+        )
+
+        if result is None:
+            return None
+
+        return _category_from_response(result)
 
     def delete_glossary(self, guid: str) -> None:
         """
