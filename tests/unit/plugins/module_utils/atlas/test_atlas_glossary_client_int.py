@@ -399,3 +399,87 @@ def test_find_categories_without_a_match(
     glossary, _, _ = atlas_glossary_category_tree
 
     assert atlas_glossary_client.find_categories(str(glossary.guid), name="Nope") == []
+
+
+def test_partial_update_category(atlas_glossary_client, atlas_glossary_category_tree):
+    """Test a partial update changes the given fields and keeps the hierarchy."""
+    _, parent, child = atlas_glossary_category_tree
+
+    updated = atlas_glossary_client.partial_update_category(
+        str(parent.guid),
+        {"short_description": "short", "name": "Renamed"},
+    )
+
+    assert updated.name == "Renamed"
+    assert updated.short_description == "short"
+    assert [c.category_guid for c in updated.children_categories] == [child.guid]
+
+
+def test_partial_update_category_clears_a_field_with_an_empty_string(
+    atlas_glossary_client,
+    atlas_deletable_glossary,
+):
+    """Test an empty string clears a description."""
+    category = atlas_glossary_client.create_category(
+        AtlasGlossaryCategory(
+            name="Customer",
+            short_description="short",
+            anchor=AtlasGlossaryHeader(glossary_guid=atlas_deletable_glossary.guid),
+        ),
+    )
+
+    atlas_glossary_client.partial_update_category(
+        str(category.guid),
+        {"short_description": ""},
+    )
+
+    refreshed = atlas_glossary_client.get_category(str(category.guid))
+    assert refreshed.short_description in (NULLABLE, None, "")
+
+
+def test_unlink_category_parent(atlas_glossary_client, atlas_glossary_category_tree):
+    """Test deleting the hierarchy relationship makes the child top-level."""
+    _, parent, child = atlas_glossary_category_tree
+
+    atlas_glossary_client.unlink_category_parent(
+        str(child.parent_category.relation_guid),
+    )
+
+    assert (
+        atlas_glossary_client.get_category(str(child.guid)).parent_category is NULLABLE
+    )
+    refreshed = atlas_glossary_client.get_category(str(parent.guid))
+    assert refreshed.children_categories in (NULLABLE, None, [])
+
+
+def test_link_category_parent(atlas_glossary_client, atlas_glossary_category_tree):
+    """Test a top-level category is attached below another with a relationship."""
+    glossary, parent, child = atlas_glossary_category_tree
+    other = atlas_glossary_client.create_category(
+        AtlasGlossaryCategory(
+            name="Other",
+            anchor=AtlasGlossaryHeader(glossary_guid=glossary.guid),
+        ),
+    )
+
+    atlas_glossary_client.link_category_parent(str(parent.guid), str(other.guid))
+
+    refreshed = atlas_glossary_client.get_category(str(other.guid))
+    assert refreshed.parent_category.category_guid == parent.guid
+
+
+def test_delete_category(atlas_glossary_client, atlas_glossary_category_tree):
+    """Test a deleted category is gone and its child is promoted to the top level."""
+    _, parent, child = atlas_glossary_category_tree
+
+    atlas_glossary_client.delete_category(str(parent.guid))
+
+    assert atlas_glossary_client.get_category(str(parent.guid)) is None
+    assert (
+        atlas_glossary_client.get_category(str(child.guid)).parent_category is NULLABLE
+    )
+
+
+def test_delete_category_unknown_guid_is_tolerated(atlas_glossary_client):
+    """Test deleting a category that does not exist is not an error."""
+    atlas_glossary_client.delete_category(UNKNOWN_GUID)

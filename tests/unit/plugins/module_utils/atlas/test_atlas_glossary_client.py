@@ -770,6 +770,139 @@ def test_create_category_rejects_malformed_responses(mocker, body):
         )
 
 
+def test_partial_update_category(mocker):
+    """Test only the given fields are PUT, in camelCase, and the category is returned."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.put.return_value = CATEGORY_RESPONSE
+
+    result = AtlasGlossaryClient(api_client).partial_update_category(
+        CATEGORY_GUID,
+        {"short_description": "short", "name": "Customer", "long_description": ""},
+    )
+
+    assert result == EXPECTED_CATEGORY
+    api_client.put.assert_called_once_with(
+        f"/api/atlas/v2/glossary/category/{CATEGORY_GUID}/partial",
+        data={"shortDescription": "short", "name": "Customer", "longDescription": ""},
+    )
+
+
+def test_partial_update_category_without_changes_fails(mocker):
+    """Test an empty update is refused here, since Atlas answers it with HTTP 400."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+
+    with pytest.raises(ServicesError, match="at least one"):
+        AtlasGlossaryClient(api_client).partial_update_category(CATEGORY_GUID, {})
+
+    api_client.put.assert_not_called()
+
+
+def test_partial_update_category_quotes_the_path_segment(mocker):
+    """Test a guid with reserved characters cannot change the request path."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.put.return_value = CATEGORY_RESPONSE
+
+    AtlasGlossaryClient(api_client).partial_update_category("a/b c", {"name": "n"})
+
+    assert (
+        api_client.put.call_args.args[0]
+        == "/api/atlas/v2/glossary/category/a%2Fb%20c/partial"
+    )
+
+
+@pytest.mark.parametrize("body", MALFORMED_GLOSSARIES, ids=MALFORMED_IDS)
+def test_partial_update_category_rejects_malformed_responses(mocker, body):
+    """Test an unexpected update response becomes a ServicesError."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.put.return_value = body
+
+    with pytest.raises(ServicesError, match="unexpected"):
+        AtlasGlossaryClient(api_client).partial_update_category(
+            CATEGORY_GUID,
+            {"name": "n"},
+        )
+
+
+def test_delete_category(mocker):
+    """Test the delete addresses the guid and tolerates an already-missing category."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.delete.return_value = None
+
+    AtlasGlossaryClient(api_client).delete_category(CATEGORY_GUID)
+
+    api_client.delete.assert_called_once_with(
+        f"/api/atlas/v2/glossary/category/{CATEGORY_GUID}",
+        squelch={404: None},
+    )
+
+
+def test_delete_category_quotes_the_path_segment(mocker):
+    """Test a guid with reserved characters cannot change the request path."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+
+    AtlasGlossaryClient(api_client).delete_category("a/b c")
+
+    assert (
+        api_client.delete.call_args.args[0]
+        == "/api/atlas/v2/glossary/category/a%2Fb%20c"
+    )
+
+
+def test_link_category_parent(mocker):
+    """Test the parent is set with a hierarchy relationship, parent as end1."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.post.return_value = {"guid": "rel-1"}
+
+    AtlasGlossaryClient(api_client).link_category_parent(PARENT_GUID, CATEGORY_GUID)
+
+    api_client.post.assert_called_once_with(
+        "/api/atlas/v2/relationship",
+        data={
+            "typeName": "AtlasGlossaryCategoryHierarchyLink",
+            "end1": {"guid": PARENT_GUID, "typeName": "AtlasGlossaryCategory"},
+            "end2": {"guid": CATEGORY_GUID, "typeName": "AtlasGlossaryCategory"},
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    "body",
+    [None, [], "x", {}],
+    ids=["none", "list", "str", "empty"],
+)
+def test_link_category_parent_rejects_malformed_responses(mocker, body):
+    """Test an unexpected relationship response becomes a ServicesError."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.post.return_value = body
+
+    with pytest.raises(ServicesError, match="unexpected"):
+        AtlasGlossaryClient(api_client).link_category_parent(PARENT_GUID, CATEGORY_GUID)
+
+
+def test_unlink_category_parent(mocker):
+    """Test the parent is removed by deleting the hierarchy relationship by guid."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+
+    AtlasGlossaryClient(api_client).unlink_category_parent("rel-1")
+
+    api_client.delete.assert_called_once_with(
+        "/api/atlas/v2/relationship/guid/rel-1",
+        squelch={404: None},
+    )
+
+
+def test_unlink_category_parent_quotes_the_path_segment(mocker):
+    """Test a guid with reserved characters cannot change the request path."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+
+    AtlasGlossaryClient(api_client).unlink_category_parent("a/b c")
+
+    assert (
+        api_client.delete.call_args.args[0]
+        == "/api/atlas/v2/relationship/guid/a%2Fb%20c"
+    )
+
+
 @pytest.mark.parametrize("name", ["Bank", "Retail banking", "Café", "a_b-c"])
 def test_validate_glossary_name_accepts(name):
     """Test names Atlas accepts, spaces and accents included, pass."""
