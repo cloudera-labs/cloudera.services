@@ -84,6 +84,16 @@ Entity instances (the objects typedefs describe, such as a `hive_table`) use a s
 - **Entity itself:** `atlas_entity` owns only `attributes` and `custom_attributes`; the other aspects each have their own module. It creates with `create_entity()` (POST), and updates an existing entity with `update_entity_by_unique_attributes()`, a partial PUT, because a POST of an existing entity fails unless it carries every mandatory attribute (HTTP 404, `ATLAS-404-00-007`). Only the differing attributes are sent, and names and values are checked against the type's attributes, including those of its super types (`entity_attribute_defs()`, sharing its traversal with `classification_attribute_defs()`), then converted by `normalize_attributes()`. The unique attributes are merged into the attributes of a new entity and are never part of an update. Custom attributes are sent as the existing map plus the new keys, since Atlas may replace the whole map. `delete_entity_by_guid()` returns the guids Atlas reports as deleted, because the delete can cascade to owned entities and the response is a silent 200 for an unknown guid. The module refuses a type whose typedef has a `service_type` (a hook-owned type such as `hive_table`) unless `allow_service_types` is set, and verifies the status after every write (`ACTIVE` after create and update, `DELETED` after delete, where a missing entity also counts as deleted)
 - **Aspect modules and missing entities:** a module that changes an aspect of an existing entity fails under `present` when the entity is missing or not `ACTIVE`, and does nothing under `absent`
 
+## Apache Atlas Glossary
+
+Glossaries, categories and terms use their own client, `AtlasGlossaryClient` in `plugins/module_utils/atlas_glossary.py` (REST base `/api/atlas/v2/glossary`), with one module per resource. The client grows with the modules; so far it covers glossaries (`atlas_glossary_info`).
+
+- **Field names:** the models use `name`, not the `displayName` of older Atlas documentation. Only `qualifiedName` is unique, so a name can match several glossaries; the info module returns every match and a module that manages a glossary must fail on ambiguity
+- **Responses omit empty fields:** null fields and empty `terms`/`categories` sets are absent from a GET, not `[]`. `terms` and `categories` on a glossary are headers (`AtlasRelatedTermHeader`, `AtlasRelatedCategoryHeader`), not full objects
+- **Verbatim maps:** `additionalAttributes` is user data; pass `GLOSSARY_VERBATIM_VALUES` as `verbatim_values` to the case-conversion helpers, with `verbatim_keys=()` and `verbatim_map_keys=()` as the entity client does
+- **Lookups:** a glossary is looked up by guid (a 404 is squelched to `None`) or found by listing, `GET /v2/glossary?limit=-1`, and filtering client-side. Deletes are hard (no `DELETED` status and nothing to purge), so a deleted glossary is simply unknown and its name can be used again
+- **Delete:** `DELETE` removes the glossary together with every term and category in it, and Atlas refuses (HTTP 400, `ATLAS-400-00-084`) while any term is assigned to an entity. Unlike an entity delete, an unknown guid is a 404, which the client squelches
+
 ## State Management
 
 - Standard states: `present`, `absent`
