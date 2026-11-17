@@ -21,8 +21,10 @@ __metaclass__ = type
 import pytest
 
 from ansible_collections.cloudera.services.plugins.module_utils.atlas_glossary import (
+    GLOSSARY_API,
     AtlasGlossary,
 )
+from ansible_collections.cloudera.services.plugins.module_utils.common import NULLABLE
 from ansible_collections.cloudera.services.tests.unit import AnsibleFailJson
 
 REQUIRED_ENV_VARS = [
@@ -190,3 +192,86 @@ def test_create_glossary_again_after_delete(
 
     assert again.guid != atlas_deletable_glossary.guid
     assert again.name == atlas_deletable_glossary.name
+
+
+def test_partial_update_glossary(atlas_glossary_client, atlas_deletable_glossary):
+    """Test the given fields change and the others stay, qualified name included."""
+    updated = atlas_glossary_client.partial_update_glossary(
+        str(atlas_deletable_glossary.guid),
+        {"long_description": "long", "language": "French", "usage": "testing"},
+    )
+
+    assert updated.long_description == "long"
+    assert updated.language == "French"
+    assert updated.usage == "testing"
+    assert updated.short_description == atlas_deletable_glossary.short_description
+    assert updated.qualified_name == atlas_deletable_glossary.qualified_name
+
+
+def test_partial_update_glossary_renames_and_keeps_the_qualified_name(
+    atlas_glossary_client,
+    atlas_deletable_glossary,
+    atlas_glossary_name,
+):
+    """Test a rename changes the name only; the qualified name is immutable."""
+    updated = atlas_glossary_client.partial_update_glossary(
+        str(atlas_deletable_glossary.guid),
+        {"name": atlas_glossary_name},
+    )
+
+    assert updated.name == atlas_glossary_name
+    assert updated.qualified_name == atlas_deletable_glossary.qualified_name
+
+
+def test_partial_update_glossary_with_an_empty_string_clears_the_field(
+    atlas_glossary_client,
+    atlas_deletable_glossary,
+):
+    """Test an empty string removes a field that holds a value."""
+    updated = atlas_glossary_client.partial_update_glossary(
+        str(atlas_deletable_glossary.guid),
+        {"short_description": ""},
+    )
+
+    assert updated.short_description in (NULLABLE, None, "")
+
+
+def test_partial_update_glossary_unknown_guid_fails(
+    atlas_rest_client,
+    atlas_glossary_client,
+):
+    """Test updating a glossary that does not exist fails with Atlas's message."""
+    with pytest.raises(AnsibleFailJson):
+        atlas_glossary_client.partial_update_glossary(UNKNOWN_GUID, {"usage": "u"})
+
+    assert atlas_rest_client.module.fail_json.call_args.kwargs["msg"]
+
+
+def test_list_terms_of_an_empty_glossary(
+    atlas_glossary_client,
+    atlas_deletable_glossary,
+):
+    """Test a glossary without terms lists none."""
+    assert atlas_glossary_client.list_terms(str(atlas_deletable_glossary.guid)) == []
+
+
+def test_list_terms(
+    atlas_rest_client,
+    atlas_glossary_client,
+    atlas_deletable_glossary,
+    atlas_glossary_name,
+):
+    """Test a term of the glossary is listed with its name and guid."""
+    # Set up through the REST API, since the client has no term methods yet.
+    term = atlas_rest_client.post(
+        f"{GLOSSARY_API}/term",
+        data={
+            "name": atlas_glossary_name,
+            "anchor": {"glossaryGuid": atlas_deletable_glossary.guid},
+        },
+    )
+
+    terms = atlas_glossary_client.list_terms(str(atlas_deletable_glossary.guid))
+
+    assert [(t.guid, t.name) for t in terms] == [(term["guid"], atlas_glossary_name)]
+    assert terms[0].assigned_entities in (NULLABLE, None, [])

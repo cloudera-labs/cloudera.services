@@ -90,6 +90,45 @@ class AtlasGlossary:
     categories: Union[List[AtlasRelatedCategoryHeader], None, NULLABLE] = NULLABLE
 
 
+@dataclass
+class AtlasRelatedObjectId:
+    """Reference to an entity a term is assigned to, with the assignment relationship."""
+
+    guid: Union[str, None, NULLABLE] = NULLABLE
+    type_name: Union[str, None, NULLABLE] = NULLABLE
+    qualified_name: Union[str, None, NULLABLE] = NULLABLE
+    display_text: Union[str, None, NULLABLE] = NULLABLE
+    entity_status: Union[str, None, NULLABLE] = NULLABLE
+    relationship_type: Union[str, None, NULLABLE] = NULLABLE
+    relationship_guid: Union[str, None, NULLABLE] = NULLABLE
+    relationship_status: Union[str, None, NULLABLE] = NULLABLE
+
+
+@dataclass
+class AtlasGlossaryTerm:
+    """Representation of an Apache Atlas glossary term (as far as the glossary needs it)."""
+
+    name: str
+
+    guid: Union[str, None, NULLABLE] = NULLABLE
+    qualified_name: Union[str, None, NULLABLE] = NULLABLE
+    assigned_entities: Union[List[AtlasRelatedObjectId], None, NULLABLE] = NULLABLE
+
+
+_RESERVED_NAME_CHARACTERS = frozenset("@.<>")
+
+
+def validate_glossary_name(kind: str, name: str) -> None:
+    """Raise ServicesError for a name Atlas would reject (ATLAS-400-00-083)."""
+    if not name:
+        raise ServicesError(f"The {kind} name may not be empty")
+
+    if _RESERVED_NAME_CHARACTERS.intersection(name):
+        raise ServicesError(
+            f"Invalid {kind} name {name!r}: a name may not contain '@', '.', '<' or '>'",
+        )
+
+
 def _glossary_to_payload(glossary: AtlasGlossary) -> Dict[str, Any]:
     """Serialise an AtlasGlossary into the camelCase body of an Atlas glossary request."""
     return camel_preserving_options(
@@ -111,6 +150,26 @@ def _glossary_from_response(raw: Any) -> AtlasGlossary:
 
     return from_dict(
         AtlasGlossary,
+        snake_preserving_options(
+            raw,
+            verbatim_keys=(),
+            verbatim_map_keys=(),
+            verbatim_values=GLOSSARY_VERBATIM_VALUES,
+        ),
+    )
+
+
+def _term_from_response(raw: Any) -> AtlasGlossaryTerm:
+    """Deserialise an Atlas glossary term response into an AtlasGlossaryTerm."""
+    if (
+        not isinstance(raw, dict)
+        or not isinstance(raw.get("guid"), str)
+        or not isinstance(raw.get("name"), str)
+    ):
+        raise ServicesError("Atlas returned an unexpected response for the term")
+
+    return from_dict(
+        AtlasGlossaryTerm,
         snake_preserving_options(
             raw,
             verbatim_keys=(),
@@ -182,6 +241,47 @@ class AtlasGlossaryClient:
         )
 
         return _glossary_from_response(result)
+
+    def partial_update_glossary(
+        self,
+        guid: str,
+        attributes: Dict[str, str],
+    ) -> AtlasGlossary:
+        """
+        Change only the given primitive fields of a glossary and return it.
+
+        Atlas accepts name, short_description, long_description, language and usage,
+        and an empty string clears a field. The full PUT is deliberately not offered:
+        it deletes every field the body leaves out.
+        """
+        if not attributes:
+            raise ServicesError("A glossary update needs at least one attribute")
+
+        result = self.api_client.put(
+            f"{GLOSSARY_API}/{quote(guid, safe='')}/partial",
+            data=camel_preserving_options(
+                attributes,
+                verbatim_keys=(),
+                verbatim_map_keys=(),
+            ),
+        )
+
+        return _glossary_from_response(result)
+
+    def list_terms(self, glossary_guid: str) -> List[AtlasGlossaryTerm]:
+        """List the terms of a glossary, each with the entities it is assigned to."""
+        result = self.api_client.get(
+            f"{GLOSSARY_API}/{quote(glossary_guid, safe='')}/terms",
+            params={"limit": "-1"},
+        )
+
+        if result is None:
+            return []
+
+        if not isinstance(result, list):
+            raise ServicesError("Atlas returned an unexpected response for the terms")
+
+        return [_term_from_response(item) for item in result]
 
     def delete_glossary(self, guid: str) -> None:
         """
