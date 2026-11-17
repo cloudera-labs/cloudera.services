@@ -27,6 +27,7 @@ from ansible_collections.cloudera.services.plugins.module_utils.common import (
 from ansible_collections.cloudera.services.plugins.module_utils.atlas import (
     AtlasAttributeDef,
     AtlasClassificationDef,
+    AtlasEntityDef,
     AtlasTypeDefClient,
 )
 from ansible_collections.cloudera.services.plugins.module_utils.atlas_entity import (
@@ -34,6 +35,7 @@ from ansible_collections.cloudera.services.plugins.module_utils.atlas_entity imp
     AtlasEntity,
     AtlasEntityClient,
     classification_attribute_defs,
+    entity_attribute_defs,
     normalize_attributes,
     normalize_business_attributes,
     validate_labels,
@@ -299,13 +301,59 @@ def test_create_entity_that_cannot_be_read_back_raises(mocker):
 
 
 def test_delete_entity_by_guid(mocker):
-    """Test delete issues a DELETE for the guid and returns nothing."""
+    """Test delete issues a DELETE for the guid and returns the guids Atlas deleted."""
     api_client = mocker.create_autospec(ServicesClient, instance=True)
-    api_client.delete.return_value = {}
+    api_client.delete.return_value = {
+        "mutatedEntities": {"DELETE": [{"guid": GUID}, {"guid": "child-guid"}]},
+    }
 
-    assert AtlasEntityClient(api_client).delete_entity_by_guid(GUID) is None
+    result = AtlasEntityClient(api_client).delete_entity_by_guid(GUID)
 
+    assert result == [GUID, "child-guid"]
     api_client.delete.assert_called_once_with(f"/api/atlas/v2/entity/guid/{GUID}")
+
+
+@pytest.mark.parametrize(
+    "response",
+    [None, {}, {"mutatedEntities": {}}, {"mutatedEntities": {"DELETE": None}}, []],
+    ids=["none", "empty", "no-delete", "null-delete", "list"],
+)
+def test_delete_entity_by_guid_without_deleted_entities(mocker, response):
+    """Test the silent 200 Atlas gives for an unknown guid returns no guids."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.delete.return_value = response
+
+    assert AtlasEntityClient(api_client).delete_entity_by_guid(GUID) == []
+
+
+def test_update_entity_by_unique_attributes(mocker):
+    """Test a partial update PUTs only the given attributes, addressed by unique attribute."""
+    api_client = mocker.create_autospec(ServicesClient, instance=True)
+    api_client.put.return_value = {"mutatedEntities": {"PARTIAL_UPDATE": []}}
+
+    result = AtlasEntityClient(api_client).update_entity_by_unique_attributes(
+        "test_entity_type",
+        {"qualifiedName": "test_entity_1"},
+        AtlasEntity(
+            type_name="test_entity_type",
+            attributes={"someCamel": 1},
+            custom_attributes={"myKey": "myValue"},
+        ),
+    )
+
+    assert result is None
+    api_client.put.assert_called_once_with(
+        "/api/atlas/v2/entity/uniqueAttribute/type/test_entity_type",
+        params={"attr:qualifiedName": "test_entity_1"},
+        data={
+            "entity": {
+                "typeName": "test_entity_type",
+                "attributes": {"someCamel": 1},
+                "customAttributes": {"myKey": "myValue"},
+            },
+        },
+    )
+    api_client.post.assert_not_called()
 
 
 def test_purge_entities(mocker):
@@ -829,3 +877,40 @@ def test_classification_attribute_defs_ignores_missing_super_type(mocker):
 
     assert result is not None
     assert [d.name for d in result] == ["own"]
+
+
+def test_entity_attribute_defs(mocker):
+    """Test the attributes of an entity type and of all its super types are returned."""
+    typedef_client = mocker.create_autospec(AtlasTypeDefClient, instance=True)
+    defs = {
+        "child": AtlasEntityDef(
+            name="child",
+            super_types=["parent", "other"],
+            attribute_defs=[AtlasAttributeDef(name="own", type_name="string")],
+        ),
+        "parent": AtlasEntityDef(
+            name="parent",
+            super_types=["other"],
+            attribute_defs=[
+                AtlasAttributeDef(name="qualifiedName", type_name="string"),
+            ],
+        ),
+        "other": AtlasEntityDef(
+            name="other",
+            attribute_defs=[AtlasAttributeDef(name="count", type_name="int")],
+        ),
+    }
+    typedef_client.get_entity_def_by_name.side_effect = defs.get
+
+    result = entity_attribute_defs(typedef_client, "child")
+
+    assert result is not None
+    assert [d.name for d in result] == ["own", "qualifiedName", "count"]
+
+
+def test_entity_attribute_defs_unknown_type(mocker):
+    """Test an entity type without a typedef returns None."""
+    typedef_client = mocker.create_autospec(AtlasTypeDefClient, instance=True)
+    typedef_client.get_entity_def_by_name.return_value = None
+
+    assert entity_attribute_defs(typedef_client, "nope") is None

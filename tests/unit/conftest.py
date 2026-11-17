@@ -2525,6 +2525,12 @@ def atlas_entity_type(
             super_types=["Referenceable"],
             attribute_defs=[
                 AtlasAttributeDef(name="note", type_name="string", is_optional=True),
+                AtlasAttributeDef(name="count", type_name="int", is_optional=True),
+                AtlasAttributeDef(
+                    name="tags",
+                    type_name="array<string>",
+                    is_optional=True,
+                ),
             ],
         ),
     )
