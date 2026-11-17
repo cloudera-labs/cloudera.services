@@ -225,21 +225,18 @@ class AtlasEntityBusinessMetadataModule(ServicesModule):
             self.module.fail_json(
                 msg="'attributes' cannot be used with state 'absent'; Atlas can only remove the whole business metadata.",
             )
-            return
 
         client = AtlasEntityClient(self.api_client)
 
         entity = self._find_entity(client)
-        active = entity is not None and entity.status == "ACTIVE"
 
-        if not active:
+        if entity is None or entity.status != "ACTIVE":
             if self.state == "present":
                 self.module.fail_json(
                     msg="Business metadata can only be set on an active entity, but the entity was not found or is deleted.",
                 )
             return
 
-        assert entity is not None
         self.result_guid = str(entity.guid)
         current = self._current_attributes(entity)
 
@@ -284,7 +281,6 @@ class AtlasEntityBusinessMetadataModule(ServicesModule):
             self.module.fail_json(
                 msg=f"Business metadata '{self.name}' does not exist.",
             )
-            return
 
         desired = normalize_business_attributes(
             self.name,
@@ -342,7 +338,6 @@ class AtlasEntityBusinessMetadataModule(ServicesModule):
             self.module.fail_json(
                 msg="Specify 'qualified_name' or 'unique_attributes' with 'type_name'.",
             )
-            return None
 
         return client.get_entity_by_unique_attributes(
             str(self.type_name),
