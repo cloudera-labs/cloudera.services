@@ -22,6 +22,7 @@
   * Create, update, and delete entities of custom types
   * Create, update, delete, and look up glossaries, with the terms and categories they contain
   * Look up glossary categories, with their parent, children, and terms
+  * Create, update, move, and delete glossary categories
 
 and more!
 

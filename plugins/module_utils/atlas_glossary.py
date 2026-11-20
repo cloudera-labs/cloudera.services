@@ -35,6 +35,7 @@ from ansible_collections.cloudera.services.plugins.module_utils.atlas import (
 )
 
 GLOSSARY_API = "/api/atlas/v2/glossary"
+RELATIONSHIP_API = "/api/atlas/v2/relationship"
 
 # `additionalAttributes` is a user-defined map, so its names are never case-converted.
 # Each name is listed in both casings because requests are snake_case and responses
@@ -438,6 +439,77 @@ class AtlasGlossaryClient:
             return None
 
         return _category_from_response(result)
+
+    def partial_update_category(
+        self,
+        guid: str,
+        attributes: Dict[str, str],
+    ) -> AtlasGlossaryCategory:
+        """
+        Change only the given primitive fields of a category and return it.
+
+        Atlas accepts name, short_description and long_description, and an empty
+        string clears a field. The full PUT is deliberately not offered: it drops
+        the category's terms and children when the body leaves them out.
+        """
+        if not attributes:
+            raise ServicesError("A category update needs at least one attribute")
+
+        result = self.api_client.put(
+            f"{GLOSSARY_API}/category/{quote(guid, safe='')}/partial",
+            data=camel_preserving_options(
+                attributes,
+                verbatim_keys=(),
+                verbatim_map_keys=(),
+            ),
+        )
+
+        return _category_from_response(result)
+
+    def link_category_parent(self, parent_guid: str, category_guid: str) -> None:
+        """
+        Make a category the child of another with a hierarchy relationship.
+
+        The category must have no parent already (unlink it first), and the parent
+        must not be the category or one of its descendants: Atlas answers a cycle
+        with a bare HTTP 500.
+        """
+        result = self.api_client.post(
+            RELATIONSHIP_API,
+            data={
+                "typeName": "AtlasGlossaryCategoryHierarchyLink",
+                "end1": {"guid": parent_guid, "typeName": "AtlasGlossaryCategory"},
+                "end2": {"guid": category_guid, "typeName": "AtlasGlossaryCategory"},
+            },
+        )
+
+        if not isinstance(result, dict) or not isinstance(result.get("guid"), str):
+            raise ServicesError(
+                "Atlas returned an unexpected response for the category parent",
+            )
+
+    def unlink_category_parent(self, relation_guid: str) -> None:
+        """
+        Make a category top-level by deleting its hierarchy relationship.
+
+        The guid is the parent's `relation_guid` on the category. A relationship
+        that is already gone is not an error.
+        """
+        self.api_client.delete(
+            f"{RELATIONSHIP_API}/guid/{quote(relation_guid, safe='')}",
+            squelch={404: None},
+        )
+
+    def delete_category(self, guid: str) -> None:
+        """
+        Delete a category. Atlas promotes its child categories to the top level.
+
+        A category that is already gone is not an error.
+        """
+        self.api_client.delete(
+            f"{GLOSSARY_API}/category/{quote(guid, safe='')}",
+            squelch={404: None},
+        )
 
     def delete_glossary(self, guid: str) -> None:
         """
